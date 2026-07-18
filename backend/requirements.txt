@@ -18,6 +18,15 @@ PyYAML>=6.0.2
 python-multipart>=0.0.17
 google-generativeai>=0.8.0
 tenacity>=9.0.0
+prometheus-client>=0.21.0
+opentelemetry-api>=1.28.0
+opentelemetry-sdk>=1.28.0
+opentelemetry-exporter-otlp-proto-http>=1.28.0
+opentelemetry-instrumentation-fastapi>=0.49b0
+opentelemetry-instrumentation-httpx>=0.49b0
+opentelemetry-instrumentation-sqlalchemy>=0.49b0
+opentelemetry-instrumentation-redis>=0.49b0
+opentelemetry-instrumentation-celery>=0.49b0
 
 # Dev / test
 pytest>=8.3.0
@@ -28,3 +37,5 @@ mypy>=1.13.0
 types-PyYAML>=6.0.12
 types-passlib>=1.7.7
 aiosqlite>=0.20.0
+fakeredis[lua]>=2.26.0
+respx>=0.21.0

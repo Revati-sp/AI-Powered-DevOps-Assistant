@@ -1,0 +1,77 @@
+from __future__ import annotations
+
+from uuid import UUID
+
+from fastapi import APIRouter, Query, Request
+
+from app.api.dependencies import CurrentUser, DBSession
+from app.api.rate_limit import APIRateLimit
+from app.models.background_task import TaskStatus
+from app.schemas.common import APIResponse
+from app.schemas.pagination import Page
+from app.schemas.tasks import (
+    TaskCancelResponse,
+    TaskDetailResponse,
+    TaskSummaryResponse,
+)
+from app.services.task_service import TaskService
+from app.utils.request_context import build_audit_context
+
+router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+
+@router.get("", response_model=APIResponse[Page[TaskSummaryResponse]])
+async def list_tasks(
+    db: DBSession,
+    current_user: CurrentUser,
+    _rl: APIRateLimit,
+    status: TaskStatus | None = None,
+    task_type: str | None = None,
+    organization_id: UUID | None = None,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> APIResponse[Page[TaskSummaryResponse]]:
+    items, total = await TaskService(db).list_tasks(
+        current_user,
+        organization_id=organization_id,
+        status=status,
+        task_type=task_type,
+        limit=limit,
+        offset=offset,
+    )
+    return APIResponse(
+        success=True,
+        data=Page(items=items, total=total, limit=limit, offset=offset),
+    )
+
+
+@router.get("/{task_id}", response_model=APIResponse[TaskDetailResponse])
+async def get_task(
+    task_id: str,
+    db: DBSession,
+    current_user: CurrentUser,
+    _rl: APIRateLimit,
+) -> APIResponse[TaskDetailResponse]:
+    try:
+        task_uuid = UUID(task_id)
+    except ValueError:
+        result = await TaskService(db).resolve_task_identifier(current_user, task_id)
+    else:
+        result = await TaskService(db).get_task(current_user, task_uuid)
+    return APIResponse(success=True, data=result)
+
+
+@router.post("/{task_id}/cancel", response_model=APIResponse[TaskCancelResponse])
+async def cancel_task(
+    task_id: UUID,
+    request: Request,
+    db: DBSession,
+    current_user: CurrentUser,
+    _rl: APIRateLimit,
+) -> APIResponse[TaskCancelResponse]:
+    result = await TaskService(db).cancel_task(
+        current_user,
+        task_id,
+        audit_context=build_audit_context(request),
+    )
+    return APIResponse(success=True, data=result)

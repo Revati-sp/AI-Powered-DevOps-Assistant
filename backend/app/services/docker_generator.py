@@ -9,6 +9,8 @@ from app.models.generated_artifact import ArtifactType
 from app.models.user import User
 from app.repositories.artifact_repository import ArtifactRepository
 from app.schemas.generators import DockerfileRequest, DockerfileResponse
+from app.services.audit_service import AuditRequestContext
+from app.services.generator_artifact_helper import apply_generator_policies_and_save
 from app.services.llm.factory import get_llm_provider
 from app.services.llm.prompts import DOCKERFILE_SYSTEM_PROMPT
 
@@ -111,10 +113,15 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "{payload.port}"]
 
 class DockerGeneratorService:
     def __init__(self, session: AsyncSession) -> None:
+        self.session = session
         self.artifacts = ArtifactRepository(session)
 
     async def generate(
-        self, user: User, payload: DockerfileRequest
+        self,
+        user: User,
+        payload: DockerfileRequest,
+        *,
+        audit_context: AuditRequestContext | None = None,
     ) -> DockerfileResponse:
         base = _deterministic_dockerfile(payload)
         try:
@@ -136,11 +143,29 @@ class DockerGeneratorService:
         except Exception:  # noqa: BLE001
             result = base
 
-        await self.artifacts.create_artifact(
-            user_id=user.id,
+        policy_findings, saved_artifact_id = await apply_generator_policies_and_save(
+            self.session,
+            user,
+            payload,
             artifact_type=ArtifactType.DOCKERFILE,
-            name=f"Dockerfile-{payload.language}",
             content=result.content,
-            metadata_json=result.model_dump(exclude={"content"}),
+            default_name=f"Dockerfile-{payload.language}",
+            metadata=result.model_dump(
+                exclude={"content", "policy_findings", "saved_artifact_id"}
+            ),
+            audit_context=audit_context,
         )
+        result.policy_findings = policy_findings
+        result.saved_artifact_id = saved_artifact_id
+
+        if not payload.save_artifact:
+            await self.artifacts.create_artifact(
+                user_id=user.id,
+                artifact_type=ArtifactType.DOCKERFILE,
+                name=f"Dockerfile-{payload.language}",
+                content=result.content,
+                metadata_json=result.model_dump(
+                    exclude={"content", "policy_findings", "saved_artifact_id"}
+                ),
+            )
         return result

@@ -26,8 +26,9 @@ class LogAnalyzeResult(BaseModel):
 
 class AsyncTaskResponse(BaseModel):
     task_id: str
-    analysis_id: UUID
     status: str
+    analysis_id: UUID | None = None
+    celery_task_id: str | None = None
 
 
 class TaskStatusResponse(BaseModel):
@@ -35,3 +36,5 @@ class TaskStatusResponse(BaseModel):
     status: str
     result: dict[str, Any] | None = None
     error: str | None = None
+    analysis_id: UUID | None = None
+    celery_task_id: str | None = None

@@ -9,7 +9,7 @@ async def test_register_login_and_me(client: AsyncClient) -> None:
         json={
             "email": "alice@example.com",
             "username": "alice",
-            "password": "password123",
+            "password": "DevOpsPass123!",
         },
     )
     assert register.status_code == 200
@@ -20,7 +20,7 @@ async def test_register_login_and_me(client: AsyncClient) -> None:
 
     login = await client.post(
         "/api/v1/auth/login",
-        data={"username": "alice", "password": "password123"},
+        data={"username": "alice", "password": "DevOpsPass123!"},
     )
     assert login.status_code == 200
     token = login.json()["access_token"]

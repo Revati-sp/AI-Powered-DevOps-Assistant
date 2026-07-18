@@ -26,6 +26,12 @@ class Conversation(Base):
         index=True,
         nullable=False,
     )
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     provider: Mapped[str] = mapped_column(String(50), nullable=False, default="gemini")
     created_at: Mapped[datetime] = mapped_column(

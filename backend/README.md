@@ -4,26 +4,48 @@ Production-style MVP backend that helps developers and DevOps engineers ask AI-p
 
 ## Features
 
-- JWT authentication with roles (`user`, `admin`)
-- AI chat assistant with conversation history (Gemini provider)
+- JWT authentication with access + refresh tokens (rotation, reuse detection, logout-all)
+- Password policy validation and bcrypt rehash on login
+- Platform roles (`user`, `admin`) plus organization RBAC
+- AI chat assistant with conversation history
+- Multi-provider LLM support: **Gemini**, **Llama**, **Mistral**
+- Streaming AI chat via Server-Sent Events (`POST /api/v1/chat/stream`)
+- Redis-backed distributed rate limiting
 - Log analysis (sync + Celery async)
 - Dockerfile, Kubernetes YAML, CI/CD pipeline, and shell command generators
 - Configuration security review (static checks + LLM enrichment)
 - PostgreSQL persistence, Redis, Celery workers
 - Docker Compose local stack
 - Structured API responses and centralized error handling
+- Organizations, RBAC, artifact versioning, policy packs, and audit logging
+- Persistent background tasks with cancellation and idempotency
+- Optional OpenTelemetry tracing and Prometheus metrics
+- GitHub Actions CI for lint, type-check, tests, migrations, and Docker build
 
 ## Architecture
 
-Clean modular layout:
+Clean modular layout (see [../docs/architecture.md](../docs/architecture.md)):
 
 - **Routes** — thin HTTP adapters
 - **Services** — business logic
 - **Repositories** — database access
-- **LLM layer** — provider abstraction (`GeminiProvider` today; Llama/Mistral can be added via factory)
+- **LLM layer** — provider abstraction (`GeminiProvider`, `LlamaProvider`, `MistralProvider`)
+- **Rate limiting** — atomic Redis sliding-window limiter
 - **Workers** — Celery async tasks
 
 Infrastructure actions are **preview/recommendation only**. The API never executes generated shell commands, applies Kubernetes manifests, runs Docker builds, or applies Terraform.
+
+## Documentation
+
+| Doc | Description |
+|---|---|
+| [Architecture](../docs/architecture.md) | Layers, subsystems, envelopes |
+| [Authentication](../docs/authentication.md) | Refresh rotation, reuse detection, logout |
+| [RBAC](../docs/rbac.md) | Role permission matrix |
+| [Security](../docs/security.md) | Headers, uploads, LLM URL validation |
+| [API errors](../docs/api-errors.md) | Error codes from `app/core/error_codes.py` |
+| [Operations](../docs/operations.md) | Docker, migrations, metrics |
+| [Development](../docs/development.md) | Local setup and test commands |
 
 ## Project structure
 
@@ -62,7 +84,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Set SECRET_KEY and GEMINI_API_KEY in .env
+# Set SECRET_KEY and provider API keys in .env
 ```
 
 ### Environment configuration
@@ -73,12 +95,124 @@ Key variables (see `.env.example`):
 |---|---|
 | `SECRET_KEY` | JWT signing secret |
 | `DATABASE_URL` | Async SQLAlchemy URL (`postgresql+asyncpg://...`) |
-| `REDIS_URL` | Redis for readiness checks |
+| `REDIS_URL` | Redis for readiness checks and rate limiting |
 | `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` | Celery |
-| `GEMINI_API_KEY` | Gemini API key |
-| `LLM_PROVIDER` | Default provider (`gemini`) |
+| `LLM_PROVIDER` | Default provider (`gemini`, `llama`, or `mistral`) |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | Gemini configuration |
+| `LLAMA_API_KEY` / `LLAMA_BASE_URL` / `LLAMA_MODEL` | Llama (OpenAI-compatible) |
+| `MISTRAL_API_KEY` / `MISTRAL_BASE_URL` / `MISTRAL_MODEL` | Mistral (OpenAI-compatible) |
+| `LLM_REQUEST_TIMEOUT_SECONDS` / `LLM_MAX_RETRIES` | Shared LLM HTTP settings |
+| `ALLOW_INSECURE_LLM_HTTP` | Allow `http://` provider URLs (dev only; default `false`) |
+| `SSE_HEARTBEAT_INTERVAL_SECONDS` | Streaming heartbeat interval |
+| `RATE_LIMIT_*` | Distributed rate-limit configuration |
+| `TRUSTED_PROXY_COUNT` | How many reverse proxies to trust for client IP |
 | `ALLOWED_ORIGINS` | CORS allow-list |
 | `MAX_UPLOAD_SIZE_MB` | Upload limit (default 5) |
+| `CELERY_TASK_*` / `BACKGROUND_TASK_RETENTION_DAYS` | Celery limits and task retention |
+| `OTEL_*` | Optional OpenTelemetry tracing |
+| `METRICS_*` | Prometheus `/metrics` endpoint controls |
+
+## Authentication and security
+
+Access tokens authorize API requests. Refresh tokens rotate on each `POST /api/v1/auth/refresh`; reuse of a spent token revokes the entire token family. Logout endpoints revoke refresh tokens server-side.
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/v1/auth/register` | Create account |
+| `POST /api/v1/auth/login` | OAuth2 password flow → token pair |
+| `POST /api/v1/auth/refresh` | Rotate refresh token |
+| `POST /api/v1/auth/logout` | Revoke one refresh token |
+| `POST /api/v1/auth/logout-all` | Revoke all sessions (requires access token) |
+
+See [../docs/authentication.md](../docs/authentication.md) and [../docs/security.md](../docs/security.md).
+
+Configure `SECRET_KEY`, `REFRESH_TOKEN_PEPPER`, and JWT settings in `.env.example` (Auth section).
+
+## Organizations and RBAC
+
+Organizations are team workspaces with roles (`owner`, `admin`, `member`, `viewer`). Personal resources keep `organization_id = null`.
+
+Key routes:
+
+- `POST/GET/PATCH/DELETE /api/v1/organizations`
+- `GET/POST/PATCH/DELETE /api/v1/organizations/{id}/members`
+
+Authorization is centralized in `OrganizationAuthService` with permission enums such as `artifact.read`, `policy.manage`, and `task.cancel`. Full matrix: [../docs/rbac.md](../docs/rbac.md).
+
+## Artifacts and versioning
+
+Generated artifacts support version history, unified diffs, and restore-as-new-version behavior.
+
+- `POST/GET/PATCH/DELETE /api/v1/artifacts`
+- `GET/POST /api/v1/artifacts/{id}/versions`
+- `POST /api/v1/artifacts/{id}/versions/{n}/restore`
+- `GET /api/v1/artifacts/{id}/diff`
+
+Generators accept optional `save_artifact`, `artifact_name`, and `organization_id` fields.
+
+## Policy packs
+
+Organization-scoped deterministic policy packs validate reviews and optional generator output.
+
+- Policy pack CRUD under `/api/v1/organizations/{id}/policy-packs`
+- Review responses include `built_in_findings`, `organization_policy_findings`, and `llm_findings`
+
+## Audit logging
+
+Append-only audit events capture security-sensitive actions with recursive metadata redaction.
+
+- `GET /api/v1/organizations/{id}/audit-events` (owner/admin)
+
+## Background tasks
+
+Persistent background tasks track async work such as log analysis.
+
+- `GET /api/v1/tasks`
+- `GET /api/v1/tasks/{task_id}`
+- `POST /api/v1/tasks/{task_id}/cancel`
+- `POST /api/v1/logs/analyze/async` supports `Idempotency-Key`
+
+Task responses use the persistent task UUID as the primary `task_id`. Compatibility fields include `analysis_id` and `celery_task_id`.
+
+## Observability
+
+Optional OpenTelemetry tracing is controlled by `OTEL_ENABLED`. When disabled, no exporter is required.
+
+Prometheus metrics are exposed at `GET /metrics` when `METRICS_ENABLED=true`. Health and readiness endpoints are not rate-limited.
+
+Every response includes `X-Request-ID`.
+
+## CI
+
+GitHub Actions workflow: `.github/workflows/backend-ci.yml`
+
+Checks:
+
+- Ruff lint and format
+- MyPy
+- Pytest with `--cov-fail-under=85`
+- Alembic upgrade/check against PostgreSQL
+- Application import and OpenAPI dump
+- Docker Compose config and Docker build
+- `pip-audit` and optional `gitleaks`
+
+Local equivalents:
+
+```bash
+cd backend
+ruff check app tests
+ruff format --check app tests
+mypy app
+pytest --cov=app --cov-report=term-missing --cov-fail-under=85
+alembic upgrade head
+alembic check
+python -c "from app.main import app; print(app.title)"
+python -c "from app.main import app; import json; json.dumps(app.openapi())"
+docker compose config
+docker build .
+```
+
+Provider calls and telemetry exporters are mocked in tests; real credentials are not required.
 
 ### Database migrations
 
@@ -114,6 +248,110 @@ Services:
 
 Docs: `http://localhost:8000/docs`
 
+## LLM providers
+
+Supported provider names (case-insensitive):
+
+- `gemini`
+- `llama`
+- `mistral`
+
+Select per request with `"provider": "llama"` or set `LLM_PROVIDER` as the default.
+
+Llama and Mistral use OpenAI-compatible HTTP APIs:
+
+```text
+POST {BASE_URL}/chat/completions
+Authorization: Bearer <API_KEY>
+```
+
+Provider base URLs must be `https` by default. Set `ALLOW_INSECURE_LLM_HTTP=true` only for local development. URLs with embedded credentials are rejected.
+
+All provider unit/integration tests mock HTTP. Real credentials are not required for `pytest`.
+
+## Streaming chat (SSE)
+
+Endpoint:
+
+```text
+POST /api/v1/chat/stream
+Content-Type: application/json
+Accept: text/event-stream
+```
+
+SSE event types:
+
+| Event | Meaning |
+|---|---|
+| `conversation` | Conversation ID (always first) |
+| `token` | Incremental assistant text chunk |
+| `heartbeat` | Keep-alive during long pauses |
+| `completed` | Stream finished; assistant message persisted |
+| `error` | Stream failed after it started |
+
+Example:
+
+```bash
+curl -N \
+  -X POST http://localhost:8000/api/v1/chat/stream \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Explain CrashLoopBackOff",
+    "provider": "llama"
+  }'
+```
+
+Persistence rules:
+
+- User message is saved before generation starts
+- Assistant message is saved only after successful completion
+- Failed/cancelled streams do not persist an assistant message
+
+The non-streaming `POST /api/v1/chat` endpoint remains unchanged.
+
+## Rate limiting
+
+Distributed sliding-window limits are stored in Redis (atomic Lua). Defaults:
+
+| Category | Default | Identity |
+|---|---|---|
+| Auth (`/auth/login`, `/auth/register`) | 10/min | Client IP |
+| API (protected non-LLM routes) | 120/min | User ID |
+| LLM (chat, generators, review) | 20/min | User ID |
+| Stream (`/chat/stream`) | 10/min | User ID |
+| Upload / log analysis | 10/min | User ID |
+| Health / ready / metrics | Unlimited | — |
+
+Exceeded requests return HTTP `429` with:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "RATE_LIMIT_EXCEEDED",
+    "message": "Too many requests. Try again later.",
+    "details": {"retry_after_seconds": 42}
+  }
+}
+```
+
+Headers:
+
+- `Retry-After`
+- `X-RateLimit-Limit`
+- `X-RateLimit-Remaining`
+- `X-RateLimit-Reset`
+
+Redis failure behavior:
+
+- `RATE_LIMIT_FAIL_OPEN=true` (default): allow the request and log a warning
+- `RATE_LIMIT_FAIL_OPEN=false`: return HTTP `503`
+
+Streaming limits are checked **before** SSE starts, conversation creation, persistence, or LLM calls.
+
+Forwarded IP headers are ignored unless `TRUSTED_PROXY_COUNT > 0`.
+
 ## Running tests
 
 ```bash
@@ -121,7 +359,7 @@ cd backend
 pytest
 ```
 
-LLM calls are mocked. Real Gemini credentials are not required.
+LLM calls and provider HTTP are mocked. Real Gemini/Llama/Mistral credentials are not required.
 
 Quality checks:
 
@@ -197,17 +435,13 @@ curl http://localhost:8000/ready
 - No automatic cluster, Docker daemon, or Terraform mutations
 - File uploads are size/type validated, but treat all AI output as untrusted
 - Set a strong `SECRET_KEY` and never commit real `.env` values
-- Gemini responses can be incomplete/incorrect — always review before production use
+- Never log API keys, Authorization headers, full prompts, or uploaded logs
+- AI responses can be incomplete/incorrect — always review before production use
 
 ## Future roadmap
 
-- Additional LLM providers (Llama, Mistral)
-- Streaming chat responses
-- Redis-backed distributed rate limiting
-- RBAC for team workspaces
-- Persistent artifact versioning UI
-- Optional signed policy packs for organization standards
-- OpenTelemetry tracing and metrics
+- Email invitations for organization membership
+- Advanced artifact search and tagging
 
 ## License
 

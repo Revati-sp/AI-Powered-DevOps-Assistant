@@ -2,16 +2,17 @@ from app.core.config import get_settings
 from app.core.exceptions import ValidationAppError
 from app.services.llm.base import LLMProvider
 from app.services.llm.gemini import GeminiProvider
+from app.services.llm.llama import LlamaProvider
+from app.services.llm.mistral import MistralProvider
 
-SUPPORTED_PROVIDERS = {"gemini"}
+SUPPORTED_PROVIDERS = {"gemini", "llama", "mistral"}
 
 
 def get_llm_provider(provider_name: str | None = None) -> LLMProvider:
     """
     Resolve an LLM provider by name.
 
-    Additional providers (e.g. llama, mistral) can be registered here later
-    without changing API routes.
+    Supported: gemini, llama, mistral.
     """
     settings = get_settings()
     name = (provider_name or settings.llm_provider).lower().strip()
@@ -24,6 +25,10 @@ def get_llm_provider(provider_name: str | None = None) -> LLMProvider:
 
     if name == "gemini":
         return GeminiProvider()
+    if name == "llama":
+        return LlamaProvider()
+    if name == "mistral":
+        return MistralProvider()
 
     raise ValidationAppError(
         f"Provider '{name}' is not implemented yet.",

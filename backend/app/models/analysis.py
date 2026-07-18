@@ -38,6 +38,12 @@ class Analysis(Base):
         index=True,
         nullable=False,
     )
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
     analysis_type: Mapped[AnalysisType] = mapped_column(
         Enum(
             AnalysisType,

@@ -1,7 +1,10 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.analysis import Analysis, AnalysisStatus, AnalysisType
@@ -20,15 +23,99 @@ class ArtifactRepository:
         name: str,
         content: str,
         metadata_json: dict[str, Any] | None = None,
+        organization_id: UUID | None = None,
+        description: str | None = None,
     ) -> GeneratedArtifact:
         artifact = GeneratedArtifact(
             user_id=user_id,
+            organization_id=organization_id,
             artifact_type=artifact_type,
             name=name,
+            description=description,
             content=content,
             metadata_json=metadata_json,
         )
         self.session.add(artifact)
+        await self.session.flush()
+        await self.session.refresh(artifact)
+        return artifact
+
+    async def get_artifact_for_update(
+        self, artifact_id: UUID
+    ) -> GeneratedArtifact | None:
+        result = await self.session.execute(
+            select(GeneratedArtifact)
+            .where(
+                GeneratedArtifact.id == artifact_id,
+                GeneratedArtifact.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
+    async def get_artifact(self, artifact_id: UUID) -> GeneratedArtifact | None:
+        result = await self.session.execute(
+            select(GeneratedArtifact).where(
+                GeneratedArtifact.id == artifact_id,
+                GeneratedArtifact.deleted_at.is_(None),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_artifacts(
+        self,
+        *,
+        user_id: UUID | None = None,
+        organization_id: UUID | None = None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[GeneratedArtifact], int]:
+        query = select(GeneratedArtifact).where(GeneratedArtifact.deleted_at.is_(None))
+        if organization_id is not None:
+            query = query.where(GeneratedArtifact.organization_id == organization_id)
+        elif user_id is not None:
+            query = query.where(
+                GeneratedArtifact.user_id == user_id,
+                GeneratedArtifact.organization_id.is_(None),
+            )
+
+        count_result = await self.session.execute(
+            select(func.count()).select_from(query.subquery())
+        )
+        total = int(count_result.scalar_one())
+
+        result = await self.session.execute(
+            query.order_by(GeneratedArtifact.updated_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars().all()), total
+
+    async def update_artifact(
+        self,
+        artifact: GeneratedArtifact,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        content: str | None = None,
+        current_version_id: UUID | None = None,
+    ) -> GeneratedArtifact:
+        if name is not None:
+            artifact.name = name
+        if description is not None:
+            artifact.description = description
+        if content is not None:
+            artifact.content = content
+        if current_version_id is not None:
+            artifact.current_version_id = current_version_id
+        artifact.updated_at = datetime.now(UTC)
+        await self.session.flush()
+        await self.session.refresh(artifact)
+        return artifact
+
+    async def soft_delete(self, artifact: GeneratedArtifact) -> GeneratedArtifact:
+        artifact.deleted_at = datetime.now(UTC)
+        artifact.updated_at = datetime.now(UTC)
         await self.session.flush()
         await self.session.refresh(artifact)
         return artifact

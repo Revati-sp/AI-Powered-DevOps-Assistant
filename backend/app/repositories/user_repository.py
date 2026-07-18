@@ -42,3 +42,16 @@ class UserRepository:
         await self.session.flush()
         await self.session.refresh(user)
         return user
+
+    async def update_hashed_password(
+        self,
+        user_id: UUID,
+        hashed_password: str,
+    ) -> User | None:
+        user = await self.get_by_id(user_id)
+        if user is None:
+            return None
+        user.hashed_password = hashed_password
+        await self.session.flush()
+        await self.session.refresh(user)
+        return user

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.core.error_codes import ErrorCode
 from app.core.exceptions import ForbiddenError, UnauthorizedError
 from app.core.security import decode_access_token
 from app.models.user import User, UserRole
@@ -27,11 +28,15 @@ async def get_current_user(
     try:
         user_id = UUID(str(payload["sub"]))
     except (KeyError, ValueError) as exc:
-        raise UnauthorizedError("Invalid token subject") from exc
+        raise UnauthorizedError(
+            "Invalid token subject", code=ErrorCode.UNAUTHORIZED
+        ) from exc
 
     user = await UserRepository(db).get_by_id(user_id)
     if user is None or not user.is_active:
-        raise UnauthorizedError("User not found or inactive")
+        raise UnauthorizedError(
+            "User not found or inactive", code=ErrorCode.UNAUTHORIZED
+        )
     return user
 
 

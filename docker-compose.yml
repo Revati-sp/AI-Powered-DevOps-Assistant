@@ -1,0 +1,28 @@
+# Full stack: backend services (api, worker, db, redis) + Next.js frontend.
+# Backend compose remains usable standalone from backend/:
+#   cd backend && docker compose up --build
+#
+# From repo root:
+#   docker compose up --build
+
+include:
+  - path: backend/docker-compose.yml
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: devops-assistant-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      INTERNAL_API_BASE_URL: http://api:8000
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      AUTH_COOKIE_SECURE: "false"
+      NEXT_TELEMETRY_DISABLED: "1"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - devops-net

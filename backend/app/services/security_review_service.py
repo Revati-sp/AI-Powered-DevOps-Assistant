@@ -10,8 +10,11 @@ from app.models.analysis import AnalysisStatus, AnalysisType
 from app.models.user import User
 from app.repositories.artifact_repository import ArtifactRepository
 from app.schemas.reviews import ReviewFinding, ReviewRequest, ReviewResponse
+from app.services.audit_service import AuditRequestContext, AuditService
 from app.services.llm.factory import get_llm_provider
 from app.services.llm.prompts import REVIEW_SYSTEM_PROMPT
+from app.services.policy_service import PolicyService
+from app.services.rbac import OrganizationAuthService, Permission
 from app.utils.sanitization import preview_text, sanitize_text
 
 SECRET_RE = re.compile(
@@ -159,7 +162,6 @@ def run_static_checks(config_type: str, content: str) -> list[ReviewFinding]:
                 )
             )
 
-    # Capture first USER/root style issues by scanning lines for context.
     for idx, line in enumerate(lines, start=1):
         if re.search(r"(?i)USER\s+root\b", line):
             findings.append(
@@ -174,6 +176,19 @@ def run_static_checks(config_type: str, content: str) -> list[ReviewFinding]:
             )
 
     return findings
+
+
+def _policy_to_review_finding(policy_finding: Any) -> ReviewFinding:
+    return ReviewFinding(
+        severity=policy_finding.severity,
+        title=policy_finding.title,
+        description=policy_finding.description,
+        recommendation=policy_finding.recommendation,
+        line=policy_finding.line,
+        source="organization_policy",
+        rule_key=policy_finding.rule_key,
+        policy_pack_id=policy_finding.policy_pack_id,
+    )
 
 
 def _score_from_findings(findings: list[ReviewFinding]) -> int:
@@ -192,19 +207,51 @@ def _score_from_findings(findings: list[ReviewFinding]) -> int:
 
 class SecurityReviewService:
     def __init__(self, session: AsyncSession) -> None:
+        self.session = session
         self.artifacts = ArtifactRepository(session)
+        self.policy_service = PolicyService(session)
+        self.org_auth = OrganizationAuthService(session)
+        self.audit = AuditService(session)
 
-    async def review(self, user: User, payload: ReviewRequest) -> ReviewResponse:
+    async def review(
+        self,
+        user: User,
+        payload: ReviewRequest,
+        *,
+        audit_context: AuditRequestContext | None = None,
+    ) -> ReviewResponse:
         content = sanitize_text(payload.content, max_length=500_000)
-        findings = run_static_checks(payload.type, content)
-        summary = f"Static review found {len(findings)} issue(s) in {payload.type} configuration."
+        built_in_findings = run_static_checks(payload.type, content)
+        organization_policy_findings: list[ReviewFinding] = []
+        llm_findings: list[ReviewFinding] = []
+
+        if payload.organization_id and payload.policy_pack_ids:
+            await self.org_auth.require_permission(
+                payload.organization_id, user.id, Permission.POLICY_READ
+            )
+            policy_findings = await self.policy_service.evaluate_packs(
+                organization_id=payload.organization_id,
+                policy_pack_ids=payload.policy_pack_ids,
+                config_type=payload.type,
+                content=content,
+            )
+            organization_policy_findings = [
+                _policy_to_review_finding(item) for item in policy_findings
+            ]
+
+        deterministic_findings = built_in_findings + organization_policy_findings
+        summary = (
+            f"Static review found {len(built_in_findings)} issue(s) "
+            f"and organization policies found {len(organization_policy_findings)} issue(s) "
+            f"in {payload.type} configuration."
+        )
         improved_content: str | None = None
 
         try:
             provider = get_llm_provider(payload.provider)
             prompt = (
                 f"Config type: {payload.type}\n"
-                f"Static findings: {json.dumps([f.model_dump() for f in findings])}\n\n"
+                f"Static findings: {json.dumps([f.model_dump() for f in deterministic_findings])}\n\n"
                 f"CONTENT:\n{content[:100_000]}"
             )
             raw = await provider.generate(prompt, system_prompt=REVIEW_SYSTEM_PROMPT)
@@ -217,14 +264,18 @@ class SecurityReviewService:
             improved_content = data.get("improved_content")
             for item in data.get("findings") or []:
                 finding = ReviewFinding.model_validate({**item, "source": "llm"})
-                findings.append(finding)
+                llm_findings.append(finding)
         except Exception:  # noqa: BLE001
             pass
 
+        all_findings = deterministic_findings + llm_findings
         result = ReviewResponse(
-            score=_score_from_findings(findings),
+            score=_score_from_findings(deterministic_findings),
             summary=summary,
-            findings=findings,
+            findings=all_findings,
+            built_in_findings=built_in_findings,
+            organization_policy_findings=organization_policy_findings,
+            llm_findings=llm_findings,
             improved_content=improved_content
             if isinstance(improved_content, str)
             else None,
@@ -235,6 +286,18 @@ class SecurityReviewService:
             analysis_type=AnalysisType.REVIEW,
             input_preview=preview_text(content),
             status=AnalysisStatus.COMPLETED,
-            result_json=result.model_dump(),
+            result_json=result.model_dump(mode="json"),
+        )
+        await self.audit.record_event(
+            action="review.completed",
+            actor_user_id=user.id,
+            organization_id=payload.organization_id,
+            resource_type="review",
+            resource_id=None,
+            request_context=audit_context,
+            metadata={
+                "config_type": payload.type,
+                "finding_count": len(deterministic_findings),
+            },
         )
         return result

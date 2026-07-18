@@ -9,6 +9,8 @@ from app.models.generated_artifact import ArtifactType
 from app.models.user import User
 from app.repositories.artifact_repository import ArtifactRepository
 from app.schemas.generators import ShellCommandRequest, ShellCommandResponse
+from app.services.audit_service import AuditRequestContext
+from app.services.generator_artifact_helper import apply_generator_policies_and_save
 from app.services.llm.factory import get_llm_provider
 from app.services.llm.prompts import SHELL_COMMAND_SYSTEM_PROMPT
 from app.utils.command_risk import classify_command_risk
@@ -38,10 +40,15 @@ def _heuristic_command(payload: ShellCommandRequest) -> tuple[str, str]:
 
 class ShellCommandService:
     def __init__(self, session: AsyncSession) -> None:
+        self.session = session
         self.artifacts = ArtifactRepository(session)
 
     async def generate(
-        self, user: User, payload: ShellCommandRequest
+        self,
+        user: User,
+        payload: ShellCommandRequest,
+        *,
+        audit_context: AuditRequestContext | None = None,
     ) -> ShellCommandResponse:
         request = sanitize_text(payload.request, max_length=2000)
         command, explanation = _heuristic_command(payload)
@@ -75,11 +82,29 @@ class ShellCommandService:
             requires_confirmation=risk.requires_confirmation,
         )
 
-        await self.artifacts.create_artifact(
-            user_id=user.id,
+        policy_findings, saved_artifact_id = await apply_generator_policies_and_save(
+            self.session,
+            user,
+            payload,
             artifact_type=ArtifactType.COMMAND,
-            name="shell-command",
             content=result.command,
-            metadata_json=result.model_dump(exclude={"command"}),
+            default_name="shell-command",
+            metadata=result.model_dump(
+                exclude={"command", "policy_findings", "saved_artifact_id"}
+            ),
+            audit_context=audit_context,
         )
+        result.policy_findings = policy_findings
+        result.saved_artifact_id = saved_artifact_id
+
+        if not payload.save_artifact:
+            await self.artifacts.create_artifact(
+                user_id=user.id,
+                artifact_type=ArtifactType.COMMAND,
+                name="shell-command",
+                content=result.command,
+                metadata_json=result.model_dump(
+                    exclude={"command", "policy_findings", "saved_artifact_id"}
+                ),
+            )
         return result

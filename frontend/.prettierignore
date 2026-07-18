@@ -1,0 +1,9 @@
+node_modules
+.next
+coverage
+playwright-report
+test-results
+storybook-static
+lib/api/generated-types.ts
+openapi.json
+package-lock.json

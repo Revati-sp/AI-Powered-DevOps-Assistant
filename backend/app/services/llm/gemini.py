@@ -28,7 +28,7 @@ class GeminiProvider(LLMProvider):
         settings = get_settings()
         self.api_key = api_key if api_key is not None else settings.gemini_api_key
         self.model_name = model_name or settings.gemini_model
-        self.timeout_seconds = settings.llm_timeout_seconds
+        self.timeout_seconds = settings.effective_llm_timeout
 
         if not self.api_key:
             raise LLMProviderError(

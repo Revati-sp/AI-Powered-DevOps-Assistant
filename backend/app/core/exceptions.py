@@ -1,5 +1,7 @@
 from typing import Any
 
+from app.core.error_codes import ErrorCode
+
 
 class AppError(Exception):
     """Base application error with structured API details."""
@@ -8,7 +10,7 @@ class AppError(Exception):
         self,
         message: str,
         *,
-        code: str = "APP_ERROR",
+        code: str = ErrorCode.APP_ERROR,
         status_code: int = 400,
         details: dict[str, Any] | None = None,
     ) -> None:
@@ -21,27 +23,35 @@ class AppError(Exception):
 
 class NotFoundError(AppError):
     def __init__(self, message: str = "Resource not found", **kwargs: Any) -> None:
-        super().__init__(message, code="NOT_FOUND", status_code=404, **kwargs)
+        super().__init__(message, code=ErrorCode.NOT_FOUND, status_code=404, **kwargs)
 
 
 class UnauthorizedError(AppError):
-    def __init__(self, message: str = "Unauthorized", **kwargs: Any) -> None:
-        super().__init__(message, code="UNAUTHORIZED", status_code=401, **kwargs)
+    def __init__(
+        self,
+        message: str = "Unauthorized",
+        *,
+        code: str = ErrorCode.INVALID_CREDENTIALS,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(message, code=code, status_code=401, **kwargs)
 
 
 class ForbiddenError(AppError):
     def __init__(self, message: str = "Forbidden", **kwargs: Any) -> None:
-        super().__init__(message, code="FORBIDDEN", status_code=403, **kwargs)
+        super().__init__(message, code=ErrorCode.FORBIDDEN, status_code=403, **kwargs)
 
 
 class ValidationAppError(AppError):
     def __init__(self, message: str = "Invalid request", **kwargs: Any) -> None:
-        super().__init__(message, code="VALIDATION_ERROR", status_code=422, **kwargs)
+        super().__init__(
+            message, code=ErrorCode.VALIDATION_ERROR, status_code=422, **kwargs
+        )
 
 
 class ConflictError(AppError):
     def __init__(self, message: str = "Conflict", **kwargs: Any) -> None:
-        super().__init__(message, code="CONFLICT", status_code=409, **kwargs)
+        super().__init__(message, code=ErrorCode.CONFLICT, status_code=409, **kwargs)
 
 
 class LLMProviderError(AppError):
@@ -50,9 +60,15 @@ class LLMProviderError(AppError):
         message: str = "LLM provider request failed",
         **kwargs: Any,
     ) -> None:
-        super().__init__(message, code="LLM_ERROR", status_code=502, **kwargs)
+        super().__init__(message, code=ErrorCode.LLM_ERROR, status_code=502, **kwargs)
 
 
 class RateLimitError(AppError):
-    def __init__(self, message: str = "Rate limit exceeded", **kwargs: Any) -> None:
-        super().__init__(message, code="RATE_LIMIT", status_code=429, **kwargs)
+    def __init__(
+        self,
+        message: str = "Too many requests. Try again later.",
+        *,
+        code: str = ErrorCode.RATE_LIMIT_EXCEEDED,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(message, code=code, status_code=429, **kwargs)

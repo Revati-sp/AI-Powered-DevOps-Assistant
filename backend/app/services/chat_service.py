@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
+from typing import Any
 from uuid import UUID
 
+from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import LLMProviderError, NotFoundError
+from app.core.logging import get_logger
+from app.models.conversation import Conversation
 from app.models.message import MessageRole
 from app.models.user import User
 from app.repositories.conversation_repository import ConversationRepository
@@ -15,20 +21,48 @@ from app.schemas.chat import (
     ConversationDetail,
     ConversationSummary,
 )
+from app.schemas.pagination import Page
+from app.services.llm.base import LLMProvider
 from app.services.llm.factory import get_llm_provider
 from app.services.llm.prompts import DEVOPS_SYSTEM_PROMPT
+from app.services.rbac import OrganizationAuthService, Permission
 from app.utils.sanitization import sanitize_text
+from app.utils.sse import encode_sse
+
+logger = get_logger(__name__)
 
 
 class ChatService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.conversations = ConversationRepository(session)
+        self.org_auth = OrganizationAuthService(session)
         self.settings = get_settings()
+
+    async def _resolve_organization_id(
+        self, user: User, organization_id: UUID | None
+    ) -> UUID | None:
+        if organization_id is None:
+            return None
+        await self.org_auth.require_permission(
+            organization_id, user.id, Permission.RESOURCE_CREATE
+        )
+        return organization_id
+
+    def _build_prompt(self, history_block: str, message: str) -> str:
+        return (
+            "Conversation history (most recent first limited):\n"
+            f"{history_block or '(none)'}\n\n"
+            f"USER: {message}\n\n"
+            "Respond as the DevOps assistant. Do not claim any command was executed."
+        )
 
     async def chat(self, user: User, payload: ChatRequest) -> ChatResponse:
         message = sanitize_text(payload.message, max_length=8000)
         provider = get_llm_provider(payload.provider)
+        organization_id = await self._resolve_organization_id(
+            user, payload.organization_id
+        )
 
         if payload.conversation_id:
             conversation = await self.conversations.get_for_user(
@@ -42,6 +76,7 @@ class ChatService:
                 user_id=user.id,
                 title=title,
                 provider=provider.name,
+                organization_id=organization_id,
             )
 
         history = await self.conversations.get_recent_messages(
@@ -50,12 +85,7 @@ class ChatService:
         history_block = "\n".join(
             f"{msg.role.value.upper()}: {msg.content}" for msg in history
         )
-        prompt = (
-            "Conversation history (most recent first limited):\n"
-            f"{history_block or '(none)'}\n\n"
-            f"USER: {message}\n\n"
-            "Respond as the DevOps assistant. Do not claim any command was executed."
-        )
+        prompt = self._build_prompt(history_block, message)
 
         answer = await provider.generate(prompt, system_prompt=DEVOPS_SYSTEM_PROMPT)
         await self.conversations.add_message(
@@ -78,9 +108,179 @@ class ChatService:
             created_at=assistant_message.created_at,
         )
 
-    async def list_conversations(self, user: User) -> list[ConversationSummary]:
-        rows = await self.conversations.list_for_user(user.id)
-        return [ConversationSummary.model_validate(row) for row in rows]
+    async def prepare_stream(
+        self, user: User, payload: ChatRequest
+    ) -> tuple[Conversation, str, str, LLMProvider]:
+        """Validate ownership, persist user message, return stream context.
+
+        Raises HTTP-safe application errors before SSE begins.
+        """
+        message = sanitize_text(payload.message, max_length=8000)
+        provider = get_llm_provider(payload.provider)
+        organization_id = await self._resolve_organization_id(
+            user, payload.organization_id
+        )
+
+        if payload.conversation_id:
+            conversation = await self.conversations.get_for_user(
+                payload.conversation_id, user.id
+            )
+            if conversation is None:
+                raise NotFoundError("Conversation not found")
+        else:
+            title = message[:80] or "New conversation"
+            conversation = await self.conversations.create(
+                user_id=user.id,
+                title=title,
+                provider=provider.name,
+                organization_id=organization_id,
+            )
+
+        await self.conversations.add_message(
+            conversation_id=conversation.id,
+            role=MessageRole.USER,
+            content=message,
+        )
+        conversation.provider = provider.name
+        await self.session.flush()
+        await self.session.commit()
+
+        history = await self.conversations.get_recent_messages(
+            conversation.id, self.settings.chat_history_limit
+        )
+        prior = history[:-1] if history and history[-1].content == message else history
+        history_block = "\n".join(
+            f"{msg.role.value.upper()}: {msg.content}" for msg in prior
+        )
+        prompt = self._build_prompt(history_block, message)
+        return conversation, prompt, provider.name, provider
+
+    async def iter_stream_events(
+        self,
+        *,
+        conversation: Conversation,
+        prompt: str,
+        provider_name: str,
+        provider: LLMProvider,
+        request: Request,
+    ) -> AsyncIterator[str]:
+        yield encode_sse("conversation", {"conversation_id": str(conversation.id)})
+
+        heartbeat_interval = self.settings.sse_heartbeat_interval_seconds
+        queue: asyncio.Queue[tuple[str, dict[str, Any] | None]] = asyncio.Queue()
+        stop = asyncio.Event()
+
+        async def produce_tokens() -> None:
+            accumulated = ""
+            try:
+                async for chunk in provider.stream(
+                    prompt, system_prompt=DEVOPS_SYSTEM_PROMPT
+                ):
+                    if stop.is_set() or await request.is_disconnected():
+                        break
+                    accumulated += chunk
+                    await queue.put(("token", {"content": chunk}))
+
+                if stop.is_set() or await request.is_disconnected():
+                    await queue.put(("cancelled", None))
+                    return
+
+                assistant_message = await self.conversations.add_message(
+                    conversation_id=conversation.id,
+                    role=MessageRole.ASSISTANT,
+                    content=accumulated,
+                )
+                await self.session.commit()
+                await queue.put(
+                    (
+                        "completed",
+                        {
+                            "message_id": str(assistant_message.id),
+                            "provider": provider_name,
+                        },
+                    )
+                )
+            except asyncio.CancelledError:
+                await queue.put(("cancelled", None))
+                raise
+            except LLMProviderError:
+                logger.warning(
+                    "Streaming LLM provider failed",
+                    extra={"provider": provider_name},
+                )
+                await queue.put(
+                    (
+                        "error",
+                        {
+                            "code": "LLM_STREAM_ERROR",
+                            "message": "The AI response could not be completed.",
+                        },
+                    )
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Unexpected streaming failure")
+                await queue.put(
+                    (
+                        "error",
+                        {
+                            "code": "LLM_STREAM_ERROR",
+                            "message": "The AI response could not be completed.",
+                        },
+                    )
+                )
+            finally:
+                await queue.put(("done", None))
+
+        producer = asyncio.create_task(produce_tokens())
+        try:
+            while True:
+                if await request.is_disconnected():
+                    stop.set()
+                    producer.cancel()
+                    break
+                try:
+                    event, data = await asyncio.wait_for(
+                        queue.get(), timeout=heartbeat_interval
+                    )
+                except TimeoutError:
+                    yield encode_sse("heartbeat", {"status": "active"})
+                    continue
+
+                if event in {"done", "cancelled"}:
+                    break
+                if event == "token" and data is not None:
+                    yield encode_sse("token", data)
+                elif event == "completed" and data is not None:
+                    yield encode_sse("completed", data)
+                    break
+                elif event == "error" and data is not None:
+                    yield encode_sse("error", data)
+                    break
+        finally:
+            stop.set()
+            if not producer.done():
+                producer.cancel()
+                try:
+                    await producer
+                except asyncio.CancelledError:
+                    pass
+
+    async def list_conversations(
+        self,
+        user: User,
+        *,
+        limit: int,
+        offset: int,
+    ) -> Page[ConversationSummary]:
+        rows, total = await self.conversations.list_for_user(
+            user.id, limit=limit, offset=offset
+        )
+        return Page(
+            items=[ConversationSummary.model_validate(row) for row in rows],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
 
     async def get_conversation(
         self, user: User, conversation_id: UUID

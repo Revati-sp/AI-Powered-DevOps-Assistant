@@ -8,6 +8,8 @@ from app.models.generated_artifact import ArtifactType
 from app.models.user import User
 from app.repositories.artifact_repository import ArtifactRepository
 from app.schemas.generators import KubernetesRequest, KubernetesResponse
+from app.services.audit_service import AuditRequestContext
+from app.services.generator_artifact_helper import apply_generator_policies_and_save
 from app.services.yaml_validator import dumps_multidoc, validate_yaml_documents
 
 
@@ -205,10 +207,15 @@ def _build_manifests(payload: KubernetesRequest) -> list[dict[str, Any]]:
 
 class KubernetesGeneratorService:
     def __init__(self, session: AsyncSession) -> None:
+        self.session = session
         self.artifacts = ArtifactRepository(session)
 
     async def generate(
-        self, user: User, payload: KubernetesRequest
+        self,
+        user: User,
+        payload: KubernetesRequest,
+        *,
+        audit_context: AuditRequestContext | None = None,
     ) -> KubernetesResponse:
         docs = _build_manifests(payload)
         content = dumps_multidoc(docs)
@@ -239,11 +246,29 @@ class KubernetesGeneratorService:
             ],
         )
 
-        await self.artifacts.create_artifact(
-            user_id=user.id,
+        policy_findings, saved_artifact_id = await apply_generator_policies_and_save(
+            self.session,
+            user,
+            payload,
             artifact_type=ArtifactType.KUBERNETES,
-            name=f"{payload.application_name}-manifests",
             content=result.content,
-            metadata_json=result.model_dump(exclude={"content"}),
+            default_name=f"{payload.application_name}-manifests",
+            metadata=result.model_dump(
+                exclude={"content", "policy_findings", "saved_artifact_id"}
+            ),
+            audit_context=audit_context,
         )
+        result.policy_findings = policy_findings
+        result.saved_artifact_id = saved_artifact_id
+
+        if not payload.save_artifact:
+            await self.artifacts.create_artifact(
+                user_id=user.id,
+                artifact_type=ArtifactType.KUBERNETES,
+                name=f"{payload.application_name}-manifests",
+                content=result.content,
+                metadata_json=result.model_dump(
+                    exclude={"content", "policy_findings", "saved_artifact_id"}
+                ),
+            )
         return result

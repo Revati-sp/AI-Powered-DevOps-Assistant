@@ -1,9 +1,21 @@
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.policies import PolicyFinding
 
-class DockerfileRequest(BaseModel):
+
+class GeneratorSaveOptions(BaseModel):
+    save_artifact: bool = False
+    artifact_name: str | None = None
+    artifact_description: str | None = None
+    organization_id: UUID | None = None
+    policy_pack_ids: list[UUID] = Field(default_factory=list)
+    validate_policies: bool = False
+
+
+class DockerfileRequest(GeneratorSaveOptions):
     language: str = Field(min_length=1, max_length=50)
     framework: str | None = None
     python_version: str = "3.12"
@@ -19,12 +31,14 @@ class DockerfileResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     best_practices: list[str] = Field(default_factory=list)
     dockerignore_recommendations: list[str] = Field(default_factory=list)
+    policy_findings: list[PolicyFinding] = Field(default_factory=list)
+    saved_artifact_id: UUID | None = None
     disclaimer: str = (
         "AI-generated Dockerfile. Review carefully before use in production."
     )
 
 
-class KubernetesRequest(BaseModel):
+class KubernetesRequest(GeneratorSaveOptions):
     application_name: str = Field(
         min_length=1, max_length=63, pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
     )
@@ -47,12 +61,14 @@ class KubernetesResponse(BaseModel):
     explanation: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     best_practices: list[str] = Field(default_factory=list)
+    policy_findings: list[PolicyFinding] = Field(default_factory=list)
+    saved_artifact_id: UUID | None = None
     disclaimer: str = (
         "AI-generated Kubernetes manifests. Validate and review before apply."
     )
 
 
-class PipelineRequest(BaseModel):
+class PipelineRequest(GeneratorSaveOptions):
     platform: Literal["github-actions", "gitlab-ci", "jenkins"]
     language: str = "python"
     framework: str | None = "fastapi"
@@ -68,12 +84,14 @@ class PipelineResponse(BaseModel):
     explanation: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     best_practices: list[str] = Field(default_factory=list)
+    policy_findings: list[PolicyFinding] = Field(default_factory=list)
+    saved_artifact_id: UUID | None = None
     disclaimer: str = (
         "AI-generated CI/CD pipeline. Secrets must come from your CI secret store."
     )
 
 
-class ShellCommandRequest(BaseModel):
+class ShellCommandRequest(GeneratorSaveOptions):
     request: str = Field(min_length=1, max_length=2000)
     operating_system: Literal["linux", "macos", "windows"] = "linux"
     shell: Literal["bash", "zsh", "sh", "powershell"] = "bash"
@@ -86,4 +104,6 @@ class ShellCommandResponse(BaseModel):
     risk_level: Literal["low", "medium", "high", "critical"]
     warnings: list[str] = Field(default_factory=list)
     requires_confirmation: bool = False
+    policy_findings: list[PolicyFinding] = Field(default_factory=list)
+    saved_artifact_id: UUID | None = None
     disclaimer: str = "Suggested command only. It was not executed by this assistant."

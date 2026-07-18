@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any
 
 import pytest
@@ -16,29 +16,47 @@ from sqlalchemy.pool import StaticPool
 
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("DEBUG", "true")
-os.environ.setdefault("SECRET_KEY", "test-secret-key-123456")
+os.environ.setdefault("SECRET_KEY", "test-secret-key-123456789012345678")
+os.environ.setdefault("REFRESH_TOKEN_PEPPER", "test-refresh-pepper-123456789012")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
 os.environ.setdefault("GEMINI_API_KEY", "test-gemini-key")
+os.environ.setdefault("LLAMA_API_KEY", "test-llama-key")
+os.environ.setdefault("MISTRAL_API_KEY", "test-mistral-key")
 os.environ.setdefault("LLM_PROVIDER", "gemini")
 os.environ.setdefault("ALLOWED_ORIGINS", "http://testserver")
+os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
+os.environ.setdefault("ALLOW_INSECURE_LLM_HTTP", "true")
+os.environ.setdefault("SSE_HEARTBEAT_INTERVAL_SECONDS", "0.05")
+os.environ.setdefault("LLM_MAX_RETRIES", "3")
 
 from app.core.config import get_settings
 from app.core.database import Base, get_db
+from app.core.rate_limit import set_rate_limiter
 from app.main import app
-from app.services.llm.base import LLMProvider
+from app.services.llm.base import LLMProvider, chunk_text
 
 get_settings.cache_clear()
+set_rate_limiter(None)
 
 
 class FakeLLMProvider(LLMProvider):
     name = "gemini"
 
     def __init__(
-        self, response: str = "Suggested steps for CrashLoopBackOff triage."
+        self,
+        response: str = "Suggested steps for CrashLoopBackOff triage.",
+        *,
+        provider_name: str = "gemini",
+        fail: bool = False,
+        stream_chunks: list[str] | None = None,
     ) -> None:
         self.response = response
+        self.name = provider_name
+        self.fail = fail
+        self.stream_chunks = stream_chunks
         self.calls: list[dict[str, Any]] = []
+        self.stream_calls = 0
 
     async def generate(
         self,
@@ -56,7 +74,33 @@ class FakeLLMProvider(LLMProvider):
                 "max_output_tokens": max_output_tokens,
             }
         )
+        if self.fail:
+            from app.core.exceptions import LLMProviderError
+
+            raise LLMProviderError(
+                "LLM provider request failed.",
+                details={"provider": self.name},
+            )
         return self.response
+
+    async def stream(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        *,
+        temperature: float = 0.2,
+        max_output_tokens: int = 4096,
+    ) -> AsyncIterator[str]:
+        self.stream_calls += 1
+        await self.generate(
+            prompt,
+            system_prompt,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+        )
+        chunks = self.stream_chunks or chunk_text(self.response)
+        for chunk in chunks:
+            yield chunk
 
 
 @pytest.fixture
@@ -128,6 +172,7 @@ async def client(
         yield ac
 
     app.dependency_overrides.clear()
+    set_rate_limiter(None)
 
 
 @pytest_asyncio.fixture
@@ -137,14 +182,14 @@ async def auth_headers(client: AsyncClient) -> dict[str, str]:
         json={
             "email": "dev@example.com",
             "username": "devops",
-            "password": "securepass123",
+            "password": "DevOpsPass123!",
         },
     )
     assert register.status_code == 200, register.text
 
     login = await client.post(
         "/api/v1/auth/login",
-        data={"username": "devops", "password": "securepass123"},
+        data={"username": "devops", "password": "DevOpsPass123!"},
     )
     assert login.status_code == 200, login.text
     token = login.json()["access_token"]

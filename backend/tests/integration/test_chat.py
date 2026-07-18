@@ -23,7 +23,11 @@ async def test_chat_and_conversation_ownership(
 
     listed = await client.get("/api/v1/chat/conversations", headers=auth_headers)
     assert listed.status_code == 200
-    assert len(listed.json()["data"]) == 1
+    page = listed.json()["data"]
+    assert page["total"] == 1
+    assert len(page["items"]) == 1
+    assert page["limit"] == 20
+    assert page["offset"] == 0
 
     detail = await client.get(
         f"/api/v1/chat/conversations/{conversation_id}",
@@ -38,12 +42,12 @@ async def test_chat_and_conversation_ownership(
         json={
             "email": "bob@example.com",
             "username": "bob",
-            "password": "password123",
+            "password": "DevOpsPass123!",
         },
     )
     bob_login = await client.post(
         "/api/v1/auth/login",
-        data={"username": "bob", "password": "password123"},
+        data={"username": "bob", "password": "DevOpsPass123!"},
     )
     bob_headers = {"Authorization": f"Bearer {bob_login.json()['access_token']}"}
     forbidden = await client.get(

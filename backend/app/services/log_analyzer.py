@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,8 +11,10 @@ from app.models.analysis import AnalysisStatus, AnalysisType
 from app.models.user import User
 from app.repositories.artifact_repository import ArtifactRepository
 from app.schemas.logs import AsyncTaskResponse, LogAnalyzeResult
+from app.services.audit_service import AuditRequestContext
 from app.services.llm.factory import get_llm_provider
 from app.services.llm.prompts import LOG_ANALYSIS_SYSTEM_PROMPT
+from app.services.task_service import TASK_TYPE_LOG_ANALYSIS, TaskService
 from app.utils.sanitization import preview_text, sanitize_text
 
 ERROR_PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -123,6 +126,7 @@ class LogAnalyzerService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.artifacts = ArtifactRepository(session)
+        self.tasks = TaskService(session)
 
     async def analyze(
         self,
@@ -151,31 +155,59 @@ class LogAnalyzerService:
         content: str,
         *,
         provider_name: str = "gemini",
+        organization_id: UUID | None = None,
+        idempotency_key: str | None = None,
+        audit_context: AuditRequestContext | None = None,
     ) -> AsyncTaskResponse:
         from app.workers.tasks import analyze_logs_task
 
         cleaned = sanitize_text(content, max_length=500_000)
+        background_task = await self.tasks.create_task(
+            user,
+            task_type=TASK_TYPE_LOG_ANALYSIS,
+            organization_id=organization_id,
+            idempotency_key=idempotency_key,
+            audit_context=audit_context,
+        )
+
+        existing_analysis = await self.artifacts.get_analysis_by_task_id(
+            str(background_task.id)
+        )
+        if existing_analysis is not None:
+            return AsyncTaskResponse(
+                task_id=str(background_task.id),
+                status=background_task.status.value,
+                analysis_id=existing_analysis.id,
+                celery_task_id=background_task.celery_task_id,
+            )
+
         analysis = await self.artifacts.create_analysis(
             user_id=user.id,
             analysis_type=AnalysisType.LOG,
             input_preview=preview_text(cleaned),
             status=AnalysisStatus.PENDING,
+            task_id=str(background_task.id),
         )
-        await self.session.commit()
+        await self.session.flush()
 
         async_result = analyze_logs_task.delay(
+            str(background_task.id),
             str(analysis.id),
             str(user.id),
             cleaned,
             provider_name,
         )
+        await self.tasks.attach_celery_task_id(background_task, async_result.id)
         await self.artifacts.update_analysis(
             analysis,
             status=AnalysisStatus.RUNNING,
-            task_id=async_result.id,
+            task_id=str(background_task.id),
         )
+        await self.session.commit()
+
         return AsyncTaskResponse(
-            task_id=async_result.id,
+            task_id=str(background_task.id),
+            status=background_task.status.value,
             analysis_id=analysis.id,
-            status=AnalysisStatus.RUNNING.value,
+            celery_task_id=async_result.id,
         )

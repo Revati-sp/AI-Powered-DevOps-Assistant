@@ -28,6 +28,15 @@ dependencies = [
   "python-multipart>=0.0.17",
   "google-generativeai>=0.8.0",
   "tenacity>=9.0.0",
+  "prometheus-client>=0.21.0",
+  "opentelemetry-api>=1.28.0",
+  "opentelemetry-sdk>=1.28.0",
+  "opentelemetry-exporter-otlp-proto-http>=1.28.0",
+  "opentelemetry-instrumentation-fastapi>=0.49b0",
+  "opentelemetry-instrumentation-httpx>=0.49b0",
+  "opentelemetry-instrumentation-sqlalchemy>=0.49b0",
+  "opentelemetry-instrumentation-redis>=0.49b0",
+  "opentelemetry-instrumentation-celery>=0.49b0",
 ]
 
 [project.optional-dependencies]
@@ -102,11 +111,13 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-q --cov=app --cov-report=term-missing --cov-fail-under=80"
+addopts = "-q --cov=app --cov-report=term-missing --cov-fail-under=85"
 
 [tool.coverage.run]
 source = ["app"]
 omit = ["app/workers/*"]
+# SQLAlchemy asyncio uses greenlets; without this, async service bodies are under-counted.
+concurrency = ["greenlet", "thread"]
 
 [tool.coverage.report]
 exclude_lines = [
