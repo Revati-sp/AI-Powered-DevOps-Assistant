@@ -9,7 +9,7 @@ export DATABASE_URL
 export MIGRATION_ENV
 export APP_ENV
 
-.PHONY: db-up db-down db-reset db-wait db-migrate db-check db-validate db-upgrade-from-previous
+.PHONY: db-up db-down db-reset db-wait db-migrate db-check db-validate db-upgrade-from-previous seed-dummy
 
 db-up:
 	$(COMPOSE_DEV) up -d db
@@ -39,3 +39,7 @@ db-validate:
 
 db-upgrade-from-previous:
 	python3 scripts/migrations/upgrade_from_previous.py --database-url "$(DATABASE_URL)"
+
+# Seed local demo users/orgs/sample content. See docs/dummy-data.md
+seed-dummy:
+	cd backend && python scripts/seed_dummy_data.py

@@ -69,6 +69,10 @@ Integration tests use in-memory SQLite and mock LLM providers. Rate limiting is 
 - Dashboard aggregates live under `/api/v1/dashboard/*` and must not load full chat/artifact payloads.
 - Never log secrets, Authorization headers, or full uploaded log content.
 
+## Dummy data
+
+Load demo users and sample content with `make seed-dummy`. Account list and details: [dummy-data.md](./dummy-data.md).
+
 ## Frontend
 
 The Next.js frontend lives in `frontend/`. See `frontend/.env.example` for API base URL configuration.

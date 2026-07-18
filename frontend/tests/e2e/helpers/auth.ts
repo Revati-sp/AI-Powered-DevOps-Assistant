@@ -95,17 +95,21 @@ export async function mockBffRoutes(page: Page): Promise<void> {
     }
 
     if (path === "/api/v1/dashboard/activity") {
-      await route.fulfill(json({ success: true, data: [] }));
+      await route.fulfill(json({ success: true, data: { items: [] } }));
       return;
     }
 
     if (path === "/api/v1/dashboard/findings") {
-      await route.fulfill(json({ success: true, data: DASHBOARD_SUMMARY.findings }));
+      await route.fulfill(
+        json({ success: true, data: { counts: DASHBOARD_SUMMARY.findings, items: [] } }),
+      );
       return;
     }
 
     if (path === "/api/v1/dashboard/tasks") {
-      await route.fulfill(json({ success: true, data: DASHBOARD_SUMMARY.tasks }));
+      await route.fulfill(
+        json({ success: true, data: { counts: DASHBOARD_SUMMARY.tasks, items: [] } }),
+      );
       return;
     }
 

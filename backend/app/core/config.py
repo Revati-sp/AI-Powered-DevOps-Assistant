@@ -156,6 +156,17 @@ class Settings(BaseSettings):
     hsts_include_subdomains: bool = True
     hsts_preload: bool = False
 
+    @field_validator(
+        "usage_default_daily_token_limit",
+        "usage_default_monthly_token_limit",
+        mode="before",
+    )
+    @classmethod
+    def empty_optional_int(cls, value: object) -> object:
+        if value == "" or value is None:
+            return None
+        return value
+
     @field_validator("database_url")
     @classmethod
     def normalize_database_url(cls, value: str) -> str:

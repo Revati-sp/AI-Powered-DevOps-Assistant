@@ -13,8 +13,8 @@ export default function AppError({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Avoid logging sensitive payloads; digest is safe for correlation.
-    console.error("App error", error.digest ?? error.name);
+    // Avoid logging sensitive payloads; digest/name/message are safe for correlation.
+    console.error("App error", error.digest ?? error.name, error.message);
   }, [error]);
 
   return (

@@ -7,7 +7,7 @@ import { SectionHeader } from "@/components/data-display/section-header";
 import { EmptyState } from "@/components/feedback/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { DashboardTaskCounts } from "@/features/dashboard/api";
+import { normalizeTaskCounts, type DashboardTaskCounts } from "@/features/dashboard/api";
 
 const TaskStatusChartInner = dynamic(
   () =>
@@ -20,14 +20,22 @@ const TaskStatusChartInner = dynamic(
   },
 );
 
+const EMPTY_COUNTS: DashboardTaskCounts = {
+  queued: 0,
+  running: 0,
+  succeeded: 0,
+  failed: 0,
+};
+
 export function TaskStatusChart({
   counts,
   loading,
 }: {
-  counts: DashboardTaskCounts;
+  counts: DashboardTaskCounts | unknown;
   loading?: boolean;
 }) {
-  const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+  const normalized = normalizeTaskCounts(counts) ?? EMPTY_COUNTS;
+  const total = Object.values(normalized).reduce((sum, value) => sum + value, 0);
 
   return (
     <Card className="h-full">
@@ -44,7 +52,7 @@ export function TaskStatusChart({
             description="Async jobs will appear here once you run log analysis or long-running work."
           />
         ) : (
-          <TaskStatusChartInner counts={counts} />
+          <TaskStatusChartInner counts={normalized} />
         )}
       </CardContent>
     </Card>

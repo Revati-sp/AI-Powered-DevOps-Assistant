@@ -14,14 +14,14 @@ export function UsageProgress({
   }
 
   const usage = snapshot?.summary?.usage;
-  if (!usage) {
+  const used = typeof usage?.requests_used === "number" ? usage.requests_used : null;
+  const limit = typeof usage?.requests_limit === "number" ? usage.requests_limit : null;
+  if (used === null || limit === null) {
     return null;
   }
 
   const percentage =
-    usage.requests_limit > 0
-      ? Math.min(100, Math.round((usage.requests_used / usage.requests_limit) * 100))
-      : 0;
+    limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
 
   return (
     <section className="space-y-3 rounded-lg border p-4" aria-label="Request usage">
@@ -34,7 +34,7 @@ export function UsageProgress({
       </div>
       <Progress value={percentage} aria-label={`${percentage}% of request limit used`} />
       <p className="text-muted-foreground text-xs">
-        {usage.requests_used.toLocaleString()} of {usage.requests_limit.toLocaleString()} requests used
+        {used.toLocaleString()} of {limit.toLocaleString()} requests used
       </p>
     </section>
   );

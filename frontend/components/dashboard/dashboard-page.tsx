@@ -13,7 +13,12 @@ import { WorkspaceStatus } from "@/components/dashboard/workspace-status";
 import { WelcomeBanner } from "@/components/onboarding/welcome-banner";
 import { PageHeader } from "@/components/data-display/page-header";
 import { ErrorState } from "@/components/feedback/error-state";
-import { fetchDashboardSnapshot } from "@/features/dashboard/api";
+import {
+  fetchDashboardSnapshot,
+  normalizeActivityItems,
+  normalizeFindingCounts,
+  normalizeTaskCounts,
+} from "@/features/dashboard/api";
 import { queryKeys } from "@/lib/api/query-keys";
 import { useWorkspaceStore } from "@/store/workspace-store";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -73,7 +78,7 @@ export function DashboardPage() {
           <div className="grid gap-4 xl:grid-cols-3">
             <div className="xl:col-span-2">
               <RecentActivity
-                items={data?.activity ?? []}
+                items={normalizeActivityItems(data?.activity)}
                 loading={isLoading || isFetching}
               />
             </div>
@@ -81,8 +86,11 @@ export function DashboardPage() {
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <TaskStatusChart counts={data?.tasks ?? EMPTY_COUNTS} loading={isLoading} />
-            <FindingsOverview counts={data?.findings} loading={isLoading} />
+            <TaskStatusChart
+              counts={normalizeTaskCounts(data?.tasks) ?? EMPTY_COUNTS}
+              loading={isLoading}
+            />
+            <FindingsOverview counts={normalizeFindingCounts(data?.findings)} loading={isLoading} />
           </div>
 
           <UsageProgress snapshot={data} loading={isLoading} />

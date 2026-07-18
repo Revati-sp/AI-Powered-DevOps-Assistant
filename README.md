@@ -38,6 +38,18 @@ docker compose up --build
 
 Backend-only Compose still works from `backend/` without the frontend.
 
+### Dummy / demo data
+
+After Postgres is up and migrations have run, load sample users, an organization, chats, artifacts, policies, tasks, and dashboard findings:
+
+```bash
+make seed-dummy
+```
+
+Full account list, password, and what gets created: **[docs/dummy-data.md](docs/dummy-data.md)**.
+
+Quick login: `demo.owner@example.com` / `DummyPass123!` (local/dev only).
+
 ## Deployment
 
 Production target: **Render** (staging + production). See:
@@ -63,6 +75,7 @@ Production target: **Render** (staging + production). See:
 | [API errors](docs/api-errors.md) | Stable error codes |
 | [Operations](docs/operations.md) | Docker, migrations, observability |
 | [Development](docs/development.md) | Local setup and quality checks |
+| [Dummy data](docs/dummy-data.md) | Local demo users, password, and seeded sample content |
 | [Deployment](docs/deployment.md) | Render platform, architecture, secrets |
 | [Staging](docs/staging.md) | Staging secrets, smoke tests, reset |
 | [Production](docs/production.md) | Production release checklist |

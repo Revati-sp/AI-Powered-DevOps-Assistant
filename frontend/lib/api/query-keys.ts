@@ -20,7 +20,8 @@ export const queryKeys = {
     activity: (filters: QueryFilters = {}) => ["dashboard", "activity", filters] as const,
     findings: (filters: QueryFilters = {}) => ["dashboard", "findings", filters] as const,
     tasks: (filters: QueryFilters = {}) => ["dashboard", "tasks", filters] as const,
-    snapshot: (filters: QueryFilters = {}) => ["dashboard", "snapshot", filters] as const,
+    // v2: unwrap activity/findings/tasks envelopes from the API
+    snapshot: (filters: QueryFilters = {}) => ["dashboard", "snapshot", "v2", filters] as const,
   },
   organizations: {
     all: () => ["organizations"] as const,
