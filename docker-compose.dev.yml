@@ -1,0 +1,37 @@
+# Development override for reliable local PostgreSQL.
+#
+# Usage (from repo root):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
+#   ./scripts/postgres/wait_for_postgres.sh
+#
+# Backend-only (from backend/):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
+#
+# IMPORTANT: POSTGRES_* variables only initialize a NEW empty data directory.
+# Changing the user/db after a volume already exists does NOT recreate roles.
+# To reset disposable local data (DESTRUCTIVE):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: devops-assistant-db
+    environment:
+      POSTGRES_USER: devops
+      POSTGRES_PASSWORD: devops
+      POSTGRES_DB: devops_assistant
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devops -d devops_assistant"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - devops-net
+
+volumes:
+  postgres_data:

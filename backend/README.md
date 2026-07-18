@@ -20,7 +20,8 @@ Production-style MVP backend that helps developers and DevOps engineers ask AI-p
 - Redis-backed distributed rate limiting
 - Log analysis (sync + Celery async)
 - Dockerfile, Kubernetes YAML, CI/CD pipeline, and shell command generators
-- Configuration security review (static checks + LLM enrichment)
+- Configuration security review (static checks + LLM enrichment) for
+  `dockerfile`, `kubernetes`, `terraform`, `github-actions`, `gitlab-ci`, and `jenkins`
 - Artifact tags, favorites, archive, type/date filters, and sorting
 - User onboarding progress tracking
 - PostgreSQL persistence, Redis, Celery workers
@@ -55,6 +56,7 @@ Infrastructure actions are **preview/recommendation only**. The API never execut
 | [API errors](../docs/api-errors.md) | Error codes from `app/core/error_codes.py` |
 | [Operations](../docs/operations.md) | Docker, migrations, metrics |
 | [Development](../docs/development.md) | Local setup and test commands |
+| [Database](../docs/database.md) | PostgreSQL local defaults, role mismatch, validation |
 
 ## Project structure
 
@@ -95,6 +97,27 @@ pip install -r requirements.txt
 cp .env.example .env
 # Set SECRET_KEY and provider API keys in .env
 ```
+
+### PostgreSQL (local)
+
+Development defaults: user `devops`, password `devops`, database `devops_assistant`.
+
+```bash
+# From repo root — starts service `db` with an explicit role/database
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
+./scripts/postgres/wait_for_postgres.sh
+
+cd backend
+# Host Alembic uses localhost; Compose services use host `db`
+alembic upgrade head
+alembic check
+alembic current
+alembic heads
+```
+
+Full validation: `make db-validate` from the repo root.
+
+If you see `role "devops" does not exist`, the Compose volume was likely initialized with a different user. See [docs/database.md](../docs/database.md) — reset with `docker compose ... down -v` (destructive) or create the role manually. `POSTGRES_*` variables only apply to a **new** empty data directory.
 
 ### Environment configuration
 
@@ -233,6 +256,10 @@ Persistent background tasks track async work such as log analysis.
 - `GET /api/v1/tasks/{task_id}`
 - `POST /api/v1/tasks/{task_id}/cancel`
 - `POST /api/v1/logs/analyze/async` supports `Idempotency-Key`
+- Optional `organization_id` on async (and paste sync) log analysis scopes the `BackgroundTask` and `Analysis` to that org; omitted/`null` keeps personal scope
+- Organization-scoped analysis requires `resource.create` (owner/admin/member). Viewers receive `403`; non-members receive non-leaking `404`
+- Celery receives only persisted task/analysis IDs; the worker reloads `organization_id` from `BackgroundTask` (never trusts a client-supplied org claim in the queue payload)
+- Async responses include `organization_id` alongside `task_id` / `status` for newer clients
 
 Task responses use the persistent task UUID as the primary `task_id`. Compatibility fields include `analysis_id` and `celery_task_id`.
 

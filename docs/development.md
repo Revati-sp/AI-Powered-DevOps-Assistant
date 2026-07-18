@@ -9,17 +9,26 @@
 ## Setup
 
 ```bash
+# 1) Start PostgreSQL with the development override (creates devops / devops_assistant)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
+./scripts/postgres/wait_for_postgres.sh
+
+# 2) Backend
 cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 # Edit SECRET_KEY and provider API keys
+# DATABASE_URL should use localhost when Alembic runs on the host
 alembic upgrade head
+alembic check
 uvicorn app.main:app --reload --port 8000
 ```
 
 Interactive docs: `http://localhost:8000/docs`
+
+Database details, role-mismatch recovery, and `make db-validate`: [database.md](./database.md).
 
 ## Environment
 

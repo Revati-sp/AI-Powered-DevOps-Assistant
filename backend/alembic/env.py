@@ -10,16 +10,14 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
 from app.core.database import Base
-from app.models import (  # noqa: F401
-    Analysis,
-    Conversation,
-    GeneratedArtifact,
-    Message,
-    User,
-)
+
+# Import the models package so every mapped table is registered on Base.metadata.
+# Required for accurate `alembic check` (do not list a partial subset of models).
+import app.models  # noqa: F401, E402
 
 config = context.config
 settings = get_settings()
+# DATABASE_URL from settings / environment overrides alembic.ini (host vs Docker differ).
 config.set_main_option("sqlalchemy.url", settings.database_url)
 
 if config.config_file_name is not None:

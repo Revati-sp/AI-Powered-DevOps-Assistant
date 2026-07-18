@@ -89,11 +89,23 @@ jobs:
       - name: MyPy
         run: mypy app
 
-      - name: Alembic upgrade head
-        run: alembic upgrade head
+      - name: Wait for PostgreSQL
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          chmod +x scripts/postgres/wait_for_postgres.sh
+          ./scripts/postgres/wait_for_postgres.sh
 
-      - name: Alembic check
-        run: alembic check
+      - name: Alembic migration validation
+        working-directory: .
+        env:
+          MIGRATION_ENV: ci
+          APP_ENV: test
+          DATABASE_URL: postgresql+asyncpg://devops:devops@localhost:5432/devops_assistant
+        run: |
+          python scripts/migrations/validate.py
+          python scripts/migrations/upgrade_from_previous.py
 
       - name: Pytest with coverage
         run: >

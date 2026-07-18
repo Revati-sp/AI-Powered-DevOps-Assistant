@@ -1,0 +1,32 @@
+# Development override for backend/ standalone Compose.
+#
+# Usage:
+#   cd backend
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
+#   ../scripts/postgres/wait_for_postgres.sh
+#
+# POSTGRES_* only apply on a fresh empty volume. Existing volumes keep old roles.
+# Destructive reset of local data:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: devops-assistant-db
+    environment:
+      POSTGRES_USER: devops
+      POSTGRES_PASSWORD: devops
+      POSTGRES_DB: devops_assistant
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devops -d devops_assistant"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  postgres_data:

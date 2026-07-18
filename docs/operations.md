@@ -20,18 +20,23 @@ The API container runs as non-root user `app` (uid 1000). Health check: `GET /he
 
 ## Database migrations
 
+PostgreSQL must be running with the `devops` role and `devops_assistant` database. Prefer:
+
 ```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
+./scripts/postgres/wait_for_postgres.sh
 cd backend
 alembic upgrade head
 alembic check          # compare models to DB (requires PostgreSQL)
 alembic heads          # should show a single head
+alembic current
 ```
 
-Migration revisions:
+Full local validation: `make db-validate` (see [database.md](./database.md)).
 
-1. `001_initial_schema` — users, conversations, messages, analyses
-2. `002_orgs_artifacts_policies_audit_tasks` — organizations, artifacts, policies, audit, tasks
-3. `003_auth_hardening` — refresh tokens
+`POSTGRES_USER` / `POSTGRES_DB` only initialize a **new** empty volume. An existing volume with a different role causes `role "devops" does not exist` — reset with `docker compose ... down -v` (destructive) or create the role manually.
+
+Migration revisions live under `backend/alembic/versions/` (`001` … current head).
 
 ## Health and readiness
 
