@@ -29,3 +29,10 @@ export const updateMemberSchema = z.object({
 });
 
 export type UpdateMemberFormValues = z.infer<typeof updateMemberSchema>;
+
+export const inviteMemberSchema = z.object({
+  email: z.string().trim().min(1, "Email is required").email("Enter a valid email address"),
+  role: z.enum(orgRoles),
+});
+
+export type InviteMemberFormValues = z.infer<typeof inviteMemberSchema>;

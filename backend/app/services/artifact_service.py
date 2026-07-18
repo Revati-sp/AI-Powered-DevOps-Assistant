@@ -8,10 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.exceptions import NotFoundError, ValidationAppError
+from app.core.logging import get_logger
 from app.models.generated_artifact import ArtifactType, GeneratedArtifact
 from app.models.user import User
 from app.repositories.artifact_repository import ArtifactRepository
+from app.repositories.artifact_tag_repository import ArtifactTagRepository
 from app.repositories.artifact_version_repository import ArtifactVersionRepository
+from app.schemas.artifact_tags import (
+    ArtifactTagAssignRequest,
+    ArtifactTagCreateRequest,
+    ArtifactTagResponse,
+)
 from app.schemas.artifacts import (
     ArtifactCreateRequest,
     ArtifactDetailResponse,
@@ -23,7 +30,10 @@ from app.schemas.artifacts import (
     ArtifactVersionResponse,
 )
 from app.services.audit_service import AuditRequestContext, AuditService
+from app.services.onboarding_service import OnboardingService
 from app.services.rbac import OrganizationAuthService, Permission
+
+logger = get_logger(__name__)
 
 
 def compute_content_hash(content: str) -> str:
@@ -60,6 +70,7 @@ class ArtifactService:
         self.session = session
         self.artifacts = ArtifactRepository(session)
         self.versions = ArtifactVersionRepository(session)
+        self.tags = ArtifactTagRepository(session)
         self.org_auth = OrganizationAuthService(session)
         self.audit = AuditService(session)
 
@@ -91,7 +102,12 @@ class ArtifactService:
         )
 
     def _to_summary(
-        self, artifact: GeneratedArtifact, *, version_number: int | None = None
+        self,
+        artifact: GeneratedArtifact,
+        *,
+        version_number: int | None = None,
+        is_favorited: bool = False,
+        tag_names: list[str] | None = None,
     ) -> ArtifactSummaryResponse:
         return ArtifactSummaryResponse(
             id=artifact.id,
@@ -102,6 +118,9 @@ class ArtifactService:
             description=artifact.description,
             current_version_id=artifact.current_version_id,
             current_version_number=version_number,
+            archived_at=artifact.archived_at,
+            is_favorited=is_favorited,
+            tags=tag_names or [],
             created_at=artifact.created_at,
             updated_at=artifact.updated_at,
         )
@@ -172,6 +191,12 @@ class ArtifactService:
                 "content_size_bytes": len(payload.content.encode("utf-8")),
             },
         )
+        try:
+            await OnboardingService(self.session).mark_flag(
+                user.id, first_artifact_created=True
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to mark first_artifact_created onboarding flag")
         return await self._to_detail(artifact)
 
     async def list_artifacts(
@@ -181,17 +206,38 @@ class ArtifactService:
         organization_id: UUID | None,
         limit: int,
         offset: int,
+        search: str | None = None,
+        tags: list[str] | None = None,
+        favorites_only: bool = False,
+        include_archived: bool = False,
+        creator_id: UUID | None = None,
     ) -> tuple[list[ArtifactSummaryResponse], int]:
         if organization_id is not None:
             await self.org_auth.require_permission(
                 organization_id, user.id, Permission.ARTIFACT_READ
             )
-            items, total = await self.artifacts.list_artifacts(
-                organization_id=organization_id, limit=limit, offset=offset
+            items, total = await self.tags.list_artifacts_filtered(
+                organization_id=organization_id,
+                search=search,
+                tag_names=tags,
+                favorites_only=favorites_only,
+                favorites_user_id=user.id if favorites_only else None,
+                include_archived=include_archived,
+                creator_id=creator_id,
+                limit=limit,
+                offset=offset,
             )
         else:
-            items, total = await self.artifacts.list_artifacts(
-                user_id=user.id, limit=limit, offset=offset
+            items, total = await self.tags.list_artifacts_filtered(
+                user_id=user.id,
+                search=search,
+                tag_names=tags,
+                favorites_only=favorites_only,
+                favorites_user_id=user.id if favorites_only else None,
+                include_archived=include_archived,
+                creator_id=creator_id,
+                limit=limit,
+                offset=offset,
             )
 
         summaries: list[ArtifactSummaryResponse] = []
@@ -205,7 +251,18 @@ class ArtifactService:
                 )
                 if version:
                     version_number = version.version_number
-            summaries.append(self._to_summary(artifact, version_number=version_number))
+            tag_rows = await self.tags.list_tags_for_artifact(artifact.id)
+            is_favorited = await self.tags.is_favorited(
+                user_id=user.id, artifact_id=artifact.id
+            )
+            summaries.append(
+                self._to_summary(
+                    artifact,
+                    version_number=version_number,
+                    is_favorited=is_favorited,
+                    tag_names=[tag.name for tag in tag_rows],
+                )
+            )
         return summaries, total
 
     async def get_artifact(
@@ -459,3 +516,108 @@ class ArtifactService:
             "jenkins": ArtifactType.JENKINS,
         }
         return mapping.get(config_type, ArtifactType.OTHER)
+
+    async def add_tag(
+        self,
+        user: User,
+        artifact_id: UUID,
+        payload: ArtifactTagAssignRequest,
+    ) -> list[ArtifactTagResponse]:
+        artifact = await self.artifacts.get_artifact(artifact_id)
+        if artifact is None:
+            raise NotFoundError("Artifact not found")
+        await self._require_write(user, artifact)
+        if payload.tag_id is not None:
+            tag = await self.tags.get_tag(payload.tag_id)
+            if tag is None:
+                raise NotFoundError("Tag not found")
+        else:
+            if not payload.name:
+                raise ValidationAppError("Tag name or tag_id is required")
+            tag = await self.tags.get_or_create_tag(
+                user_id=user.id,
+                name=payload.name,
+                organization_id=artifact.organization_id,
+                color=payload.color,
+            )
+        await self.tags.add_tag_to_artifact(artifact_id=artifact.id, tag_id=tag.id)
+        tags = await self.tags.list_tags_for_artifact(artifact.id)
+        return [ArtifactTagResponse.model_validate(item) for item in tags]
+
+    async def remove_tag(
+        self, user: User, artifact_id: UUID, tag_id: UUID
+    ) -> list[ArtifactTagResponse]:
+        artifact = await self.artifacts.get_artifact(artifact_id)
+        if artifact is None:
+            raise NotFoundError("Artifact not found")
+        await self._require_write(user, artifact)
+        await self.tags.remove_tag_from_artifact(artifact_id=artifact.id, tag_id=tag_id)
+        tags = await self.tags.list_tags_for_artifact(artifact.id)
+        return [ArtifactTagResponse.model_validate(item) for item in tags]
+
+    async def favorite(self, user: User, artifact_id: UUID) -> None:
+        artifact = await self.artifacts.get_artifact(artifact_id)
+        if artifact is None:
+            raise NotFoundError("Artifact not found")
+        await self._require_read(user, artifact)
+        await self.tags.favorite_artifact(user_id=user.id, artifact_id=artifact.id)
+
+    async def unfavorite(self, user: User, artifact_id: UUID) -> None:
+        artifact = await self.artifacts.get_artifact(artifact_id)
+        if artifact is None:
+            raise NotFoundError("Artifact not found")
+        await self._require_read(user, artifact)
+        await self.tags.unfavorite_artifact(user_id=user.id, artifact_id=artifact.id)
+
+    async def archive(self, user: User, artifact_id: UUID) -> ArtifactSummaryResponse:
+        artifact = await self.artifacts.get_artifact_for_update(artifact_id)
+        if artifact is None:
+            raise NotFoundError("Artifact not found")
+        await self._require_write(user, artifact)
+        updated = await self.tags.set_archived(artifact, archived=True)
+        is_favorited = await self.tags.is_favorited(
+            user_id=user.id, artifact_id=artifact.id
+        )
+        return self._to_summary(updated, is_favorited=is_favorited)
+
+    async def unarchive(self, user: User, artifact_id: UUID) -> ArtifactSummaryResponse:
+        artifact = await self.artifacts.get_artifact_for_update(artifact_id)
+        if artifact is None:
+            raise NotFoundError("Artifact not found")
+        await self._require_write(user, artifact)
+        updated = await self.tags.set_archived(artifact, archived=False)
+        return self._to_summary(updated)
+
+    async def list_tags(
+        self, user: User, *, organization_id: UUID | None
+    ) -> list[ArtifactTagResponse]:
+        if organization_id is not None:
+            await self.org_auth.require_permission(
+                organization_id, user.id, Permission.ARTIFACT_READ
+            )
+        return [
+            ArtifactTagResponse.model_validate(item)
+            for item in await self.tags.list_tags_for_scope(
+                user_id=user.id,
+                organization_id=organization_id,
+            )
+        ]
+
+    async def create_tag(
+        self,
+        user: User,
+        payload: ArtifactTagCreateRequest,
+        *,
+        organization_id: UUID | None,
+    ) -> ArtifactTagResponse:
+        if organization_id is not None:
+            await self.org_auth.require_permission(
+                organization_id, user.id, Permission.ARTIFACT_WRITE
+            )
+        tag = await self.tags.get_or_create_tag(
+            user_id=user.id,
+            name=payload.name,
+            organization_id=organization_id,
+            color=payload.color,
+        )
+        return ArtifactTagResponse.model_validate(tag)

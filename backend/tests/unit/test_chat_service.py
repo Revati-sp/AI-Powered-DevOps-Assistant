@@ -19,12 +19,11 @@ async def test_chat_service_with_mocked_llm(
     db_session.add(user)
     await db_session.flush()
 
+    import app.services.provider_service as provider_module
+
+    provider_module.get_llm_provider = lambda provider_name=None: fake_llm  # type: ignore[assignment]
+
     service = ChatService(db_session)
-    # Patch provider resolution used by service.
-    import app.services.chat_service as chat_module
-
-    chat_module.get_llm_provider = lambda provider_name=None: fake_llm  # type: ignore[assignment]
-
     result = await service.chat(
         user,
         ChatRequest(message="How do I debug CrashLoopBackOff?", provider="gemini"),

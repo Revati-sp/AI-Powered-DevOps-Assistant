@@ -1,0 +1,113 @@
+# Full-stack test/integration overlay.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up --build -d
+#   python scripts/smoke_test.py
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
+#
+# Deterministic test credentials only. No production secrets. LLM calls mocked via FakeLLM.
+
+name: devops-assistant-test
+
+services:
+  db:
+    environment:
+      POSTGRES_USER: devops_test
+      POSTGRES_PASSWORD: devops_test
+      POSTGRES_DB: devops_assistant_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devops_test -d devops_assistant_test"]
+
+  redis:
+    ports:
+      - "6380:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    volumes:
+      - redis_test_data:/data
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    container_name: devops-assistant-mailpit
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+    networks:
+      - devops-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8025/api/v1/info"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    environment:
+      APP_ENV: test
+      DEBUG: "true"
+      DATABASE_URL: postgresql+asyncpg://devops_test:devops_test@db:5432/devops_assistant_test
+      REDIS_URL: redis://redis:6379/10
+      CELERY_BROKER_URL: redis://redis:6379/11
+      CELERY_RESULT_BACKEND: redis://redis:6379/12
+      RATE_LIMIT_REDIS_PREFIX: devops-assistant-test:rate-limit
+      SECRET_KEY: test-compose-secret-key-not-for-production
+      REFRESH_TOKEN_PEPPER: test-compose-pepper-not-for-production
+      RATE_LIMIT_ENABLED: "false"
+      EMAIL_ENABLED: "true"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM_EMAIL: devops-assistant@test.local
+      SMTP_USE_TLS: "false"
+      FRONTEND_BASE_URL: http://localhost:3000
+      EMAIL_VERIFICATION_REQUIRED: "false"
+      LLM_PROVIDER: gemini
+      GEMINI_API_KEY: test-mock-key
+      ALLOWED_ORIGINS: http://localhost:3000,http://testserver
+      DOCS_ENABLED: "true"
+      METRICS_ENABLED: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+
+  worker:
+    environment:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://devops_test:devops_test@db:5432/devops_assistant_test
+      REDIS_URL: redis://redis:6379/10
+      CELERY_BROKER_URL: redis://redis:6379/11
+      CELERY_RESULT_BACKEND: redis://redis:6379/12
+      SECRET_KEY: test-compose-secret-key-not-for-production
+      REFRESH_TOKEN_PEPPER: test-compose-pepper-not-for-production
+      EMAIL_ENABLED: "true"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM_EMAIL: devops-assistant@test.local
+      SMTP_USE_TLS: "false"
+      GEMINI_API_KEY: test-mock-key
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+
+  frontend:
+    environment:
+      INTERNAL_API_BASE_URL: http://api:8000
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      AUTH_COOKIE_SECURE: "false"
+    depends_on:
+      api:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+
+volumes:
+  postgres_test_data:
+  redis_test_data:

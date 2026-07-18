@@ -37,20 +37,29 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { SectionHeader } from "@/components/data-display/section-header";
 import {
   countOwners,
   isSoleOwner,
-  useAddMember,
+  useCreateInvitation,
+  useInvitations,
   useMembers,
   useRemoveMember,
+  useResendInvitation,
+  useRevokeInvitation,
   useUpdateMember,
 } from "@/features/organizations/hooks";
 import {
-  addMemberSchema,
+  inviteMemberSchema,
   orgRoles,
-  type AddMemberFormValues,
+  type InviteMemberFormValues,
 } from "@/features/organizations/schemas";
-import type { OrganizationMemberResponse, OrgRole } from "@/features/organizations/types";
+import type {
+  InvitationResponse,
+  OrganizationMemberResponse,
+  OrgRole,
+} from "@/features/organizations/types";
 import { isApiClientError } from "@/lib/api/errors";
 import { formatDateTime } from "@/lib/formatters/date";
 import { can } from "@/lib/permissions/rbac";
@@ -68,12 +77,14 @@ export function MembersPageClient({ organizationId }: MembersPageProps) {
   const role = useOrganizationRole(organizationId);
   const setOrganization = useWorkspaceStore((s) => s.setOrganization);
   const [pageIndex, setPageIndex] = React.useState(0);
-  const [addOpen, setAddOpen] = React.useState(false);
+  const [inviteOpen, setInviteOpen] = React.useState(false);
   const [pendingRole, setPendingRole] = React.useState<{
     member: OrganizationMemberResponse;
     role: OrgRole;
   } | null>(null);
   const [pendingRemove, setPendingRemove] = React.useState<OrganizationMemberResponse | null>(null);
+  const [pendingRevokeInvitation, setPendingRevokeInvitation] =
+    React.useState<InvitationResponse | null>(null);
 
   React.useEffect(() => {
     setOrganization(organizationId);
@@ -83,24 +94,35 @@ export function MembersPageClient({ organizationId }: MembersPageProps) {
     limit: PAGE_SIZE,
     offset: pageIndex * PAGE_SIZE,
   });
-  const addMutation = useAddMember(organizationId);
+  const {
+    data: invitationsData,
+    isLoading: invitationsLoading,
+    isError: invitationsError,
+    error: invitationsQueryError,
+    refetch: refetchInvitations,
+  } = useInvitations(organizationId, { limit: PAGE_SIZE, offset: 0 });
+  const inviteMutation = useCreateInvitation(organizationId);
+  const resendMutation = useResendInvitation(organizationId);
+  const revokeInvitationMutation = useRevokeInvitation(organizationId);
   const updateMutation = useUpdateMember(organizationId);
   const removeMutation = useRemoveMember(organizationId);
 
   const members = data?.items ?? [];
+  const pendingInvitations =
+    invitationsData?.items.filter((invitation) => invitation.status === "pending") ?? [];
   const ownerCount = countOwners(members);
   const canManage = role ? can(role, "member.manage") : false;
 
-  const form = useForm<AddMemberFormValues>({
-    resolver: zodResolver(addMemberSchema),
+  const form = useForm<InviteMemberFormValues>({
+    resolver: zodResolver(inviteMemberSchema),
     defaultValues: { email: "", role: "member" },
   });
 
   React.useEffect(() => {
-    if (addOpen) {
+    if (inviteOpen) {
       form.reset({ email: "", role: "member" });
     }
-  }, [addOpen, form]);
+  }, [inviteOpen, form]);
 
   const requestRoleChange = (member: OrganizationMemberResponse, nextRole: OrgRole) => {
     if (member.role === nextRole) {
@@ -151,15 +173,37 @@ export function MembersPageClient({ organizationId }: MembersPageProps) {
     }
   };
 
-  const handleAdd = form.handleSubmit(async (values) => {
+  const handleInvite = form.handleSubmit(async (values) => {
     try {
-      await addMutation.mutateAsync(values);
-      toast.success(`Added ${values.email}`);
-      setAddOpen(false);
+      await inviteMutation.mutateAsync(values);
+      toast.success(`Invitation sent to ${values.email}`);
+      setInviteOpen(false);
     } catch (err) {
-      toast.error(isApiClientError(err) ? err.message : "Failed to add member");
+      toast.error(isApiClientError(err) ? err.message : "Failed to send invitation");
     }
   });
+
+  const handleResendInvitation = async (invitation: InvitationResponse) => {
+    try {
+      await resendMutation.mutateAsync(invitation.id);
+      toast.success(`Invitation resent to ${invitation.email}`);
+    } catch (err) {
+      toast.error(isApiClientError(err) ? err.message : "Failed to resend invitation");
+    }
+  };
+
+  const confirmRevokeInvitation = async () => {
+    if (!pendingRevokeInvitation) {
+      return;
+    }
+    try {
+      await revokeInvitationMutation.mutateAsync(pendingRevokeInvitation.id);
+      toast.success(`Revoked invitation for ${pendingRevokeInvitation.email}`);
+      setPendingRevokeInvitation(null);
+    } catch (err) {
+      toast.error(isApiClientError(err) ? err.message : "Failed to revoke invitation");
+    }
+  };
 
   const columns = React.useMemo<ColumnDef<OrganizationMemberResponse>[]>(
     () => [
@@ -266,9 +310,9 @@ export function MembersPageClient({ organizationId }: MembersPageProps) {
         }
         actions={
           <PermissionGate permission="member.manage" role={role}>
-            <Button type="button" onClick={() => setAddOpen(true)}>
+            <Button type="button" onClick={() => setInviteOpen(true)}>
               <UserPlus className="h-4 w-4" />
-              Add member
+              Invite member
             </Button>
           </PermissionGate>
         }
@@ -287,13 +331,90 @@ export function MembersPageClient({ organizationId }: MembersPageProps) {
         }}
       />
 
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+      <section className="space-y-4" aria-labelledby="pending-invitations-heading">
+        <SectionHeader
+          id="pending-invitations-heading"
+          title="Pending invitations"
+          description="Email invitations waiting to be accepted."
+        />
+
+        {invitationsLoading ? <LoadingState label="Loading invitations…" /> : null}
+
+        {invitationsError ? (
+          <ErrorState
+            message={
+              isApiClientError(invitationsQueryError)
+                ? invitationsQueryError.message
+                : "Failed to load invitations"
+            }
+            requestId={
+              isApiClientError(invitationsQueryError)
+                ? invitationsQueryError.requestId
+                : undefined
+            }
+            onRetry={() => void refetchInvitations()}
+          />
+        ) : null}
+
+        {!invitationsLoading && !invitationsError && pendingInvitations.length === 0 ? (
+          <p className="text-muted-foreground text-sm">No pending invitations.</p>
+        ) : null}
+
+        {!invitationsLoading && !invitationsError && pendingInvitations.length > 0 ? (
+          <ul className="divide-border divide-y rounded-md border">
+            {pendingInvitations.map((invitation) => (
+              <li
+                key={invitation.id}
+                className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{invitation.email}</span>
+                    <Badge variant="outline" className="capitalize">
+                      {invitation.role}
+                    </Badge>
+                    <Badge variant="warning">Pending</Badge>
+                  </div>
+                  <p className="text-muted-foreground text-xs">
+                    Sent {formatDateTime(invitation.created_at)} · Expires{" "}
+                    {formatDateTime(invitation.expires_at)}
+                  </p>
+                </div>
+                {canManage ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={resendMutation.isPending || revokeInvitationMutation.isPending}
+                      onClick={() => void handleResendInvitation(invitation)}
+                    >
+                      Resend
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={resendMutation.isPending || revokeInvitationMutation.isPending}
+                      onClick={() => setPendingRevokeInvitation(invitation)}
+                    >
+                      Revoke
+                    </Button>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
+
+      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add member</DialogTitle>
+            <DialogTitle>Invite member</DialogTitle>
           </DialogHeader>
           <Form {...form}>
-            <form onSubmit={handleAdd} className="space-y-4">
+            <form onSubmit={handleInvite} className="space-y-4">
               <FormField
                 control={form.control}
                 name="email"
@@ -304,7 +425,7 @@ export function MembersPageClient({ organizationId }: MembersPageProps) {
                       <Input
                         type="email"
                         autoComplete="email"
-                        disabled={addMutation.isPending}
+                        disabled={inviteMutation.isPending}
                         {...field}
                       />
                     </FormControl>
@@ -321,7 +442,7 @@ export function MembersPageClient({ organizationId }: MembersPageProps) {
                     <Select
                       value={field.value}
                       onValueChange={field.onChange}
-                      disabled={addMutation.isPending}
+                      disabled={inviteMutation.isPending}
                     >
                       <FormControl>
                         <SelectTrigger>
@@ -344,19 +465,38 @@ export function MembersPageClient({ organizationId }: MembersPageProps) {
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={addMutation.isPending}
-                  onClick={() => setAddOpen(false)}
+                  disabled={inviteMutation.isPending}
+                  onClick={() => setInviteOpen(false)}
                 >
                   Cancel
                 </Button>
-                <Button type="submit" disabled={addMutation.isPending}>
-                  {addMutation.isPending ? "Adding…" : "Add member"}
+                <Button type="submit" disabled={inviteMutation.isPending}>
+                  {inviteMutation.isPending ? "Sending…" : "Send invitation"}
                 </Button>
               </DialogFooter>
             </form>
           </Form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmationDialog
+        open={Boolean(pendingRevokeInvitation)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingRevokeInvitation(null);
+          }
+        }}
+        title="Revoke invitation?"
+        description={
+          pendingRevokeInvitation
+            ? `Revoke the pending invitation for ${pendingRevokeInvitation.email}?`
+            : undefined
+        }
+        confirmLabel="Revoke"
+        variant="destructive"
+        loading={revokeInvitationMutation.isPending}
+        onConfirm={() => void confirmRevokeInvitation()}
+      />
 
       <ConfirmationDialog
         open={Boolean(pendingRole)}

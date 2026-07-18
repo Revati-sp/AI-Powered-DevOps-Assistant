@@ -49,6 +49,9 @@ class ArtifactSummaryResponse(ORMModel):
     description: str | None = None
     current_version_id: UUID | None = None
     current_version_number: int | None = None
+    archived_at: datetime | None = None
+    is_favorited: bool = False
+    tags: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

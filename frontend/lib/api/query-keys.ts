@@ -7,6 +7,7 @@ export const queryKeys = {
   auth: {
     all: () => ["auth"] as const,
     currentUser: () => ["auth", "currentUser"] as const,
+    sessions: () => ["auth", "sessions"] as const,
   },
   conversations: {
     all: () => ["conversations"] as const,
@@ -23,10 +24,16 @@ export const queryKeys = {
     list: (organizationId: string, filters: QueryFilters = {}) =>
       ["members", organizationId, "list", filters] as const,
   },
+  invitations: {
+    all: (organizationId: string) => ["invitations", organizationId] as const,
+    list: (organizationId: string, filters: QueryFilters = {}) =>
+      ["invitations", organizationId, "list", filters] as const,
+  },
   artifacts: {
     all: () => ["artifacts"] as const,
     list: (filters: QueryFilters = {}) => ["artifacts", "list", filters] as const,
     detail: (id: string) => ["artifacts", "detail", id] as const,
+    tags: (filters: QueryFilters = {}) => ["artifacts", "tags", filters] as const,
   },
   versions: {
     all: (artifactId: string) => ["versions", artifactId] as const,
@@ -51,5 +58,23 @@ export const queryKeys = {
     all: (organizationId: string) => ["auditEvents", organizationId] as const,
     list: (organizationId: string, filters: QueryFilters = {}) =>
       ["auditEvents", organizationId, "list", filters] as const,
+  },
+  onboarding: {
+    all: () => ["onboarding"] as const,
+    me: () => ["onboarding", "me"] as const,
+  },
+  usage: {
+    all: () => ["usage"] as const,
+    me: () => ["usage", "me"] as const,
+    org: (organizationId: string) => ["usage", "org", organizationId] as const,
+    quotas: (organizationId: string) => ["usage", "quotas", organizationId] as const,
+  },
+  providers: {
+    all: () => ["providers"] as const,
+    adminConfigs: () => ["providers", "admin", "configs"] as const,
+    adminRouting: () => ["providers", "admin", "routing"] as const,
+    adminHealth: () => ["providers", "admin", "health"] as const,
+    orgConfigs: (organizationId: string) => ["providers", "org", organizationId, "configs"] as const,
+    orgRouting: (organizationId: string) => ["providers", "org", organizationId, "routing"] as const,
   },
 } as const;

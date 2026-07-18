@@ -158,18 +158,7 @@ async def test_stream_failure_does_not_persist_assistant(
 async def test_stream_invalid_provider_and_missing_conversation(
     client: AsyncClient,
     auth_headers: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.core.exceptions import ValidationAppError
-    from app.services import chat_service as chat_module
-
-    def _boom(provider_name: str | None = None) -> FakeLLMProvider:
-        raise ValidationAppError(
-            f"Unsupported LLM provider '{provider_name}'.",
-            details={"supported": ["gemini", "llama", "mistral"]},
-        )
-
-    monkeypatch.setattr(chat_module, "get_llm_provider", _boom)
     bad = await client.post(
         "/api/v1/chat/stream",
         headers=auth_headers,
@@ -177,11 +166,6 @@ async def test_stream_invalid_provider_and_missing_conversation(
     )
     assert bad.status_code == 422
 
-    monkeypatch.setattr(
-        chat_module,
-        "get_llm_provider",
-        lambda provider_name=None: FakeLLMProvider(),
-    )
     missing = await client.post(
         "/api/v1/chat/stream",
         headers=auth_headers,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import json
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 from uuid import UUID
@@ -13,9 +14,20 @@ from app.core.database import AsyncSessionLocal
 from app.core.logging import get_logger
 from app.core.metrics import record_background_task
 from app.models.analysis import AnalysisStatus
+from app.models.provider_config import LLMOperation
 from app.repositories.artifact_repository import ArtifactRepository
-from app.services.log_analyzer import analyze_log_content
+from app.repositories.task_repository import TaskRepository
+from app.repositories.user_repository import UserRepository
+from app.schemas.logs import LogAnalyzeResult
+from app.services.llm.gateway import LLMGateway
+from app.services.llm.prompts import LOG_ANALYSIS_SYSTEM_PROMPT
+from app.services.log_analyzer import (
+    _parse_llm_json,
+    _static_log_signals,
+    analyze_log_content,
+)
 from app.services.task_service import TaskService
+from app.utils.sanitization import sanitize_text
 from app.workers.celery_app import celery_app
 
 logger = get_logger(__name__)
@@ -40,10 +52,13 @@ async def _analyze_logs_async(
     provider_name: str,
 ) -> dict[str, object]:
     task_uuid = UUID(background_task_id)
+    user_uuid = UUID(user_id)
     async with AsyncSessionLocal() as session:
         repo = ArtifactRepository(session)
         task_service = TaskService(session)
-        analysis = await repo.get_analysis_for_user(UUID(analysis_id), UUID(user_id))
+        task_repo = TaskRepository(session)
+        users = UserRepository(session)
+        analysis = await repo.get_analysis_for_user(UUID(analysis_id), user_uuid)
         if analysis is None:
             await task_service.mark_failed(
                 task_uuid,
@@ -54,12 +69,54 @@ async def _analyze_logs_async(
             record_background_task("log_analysis", "failed")
             return {"error": "Analysis not found"}
 
+        background_task = await task_repo.get_by_id(task_uuid)
+        organization_id = (
+            background_task.organization_id if background_task is not None else None
+        )
+
         await task_service.mark_running(task_uuid, progress=10)
         await repo.update_analysis(analysis, status=AnalysisStatus.RUNNING)
         await session.commit()
 
         try:
-            result = await analyze_log_content(content, provider_name=provider_name)
+            user = await users.get_by_id(user_uuid)
+            cleaned = sanitize_text(content, max_length=500_000)
+            if user is not None:
+                signals = _static_log_signals(cleaned)
+                try:
+                    gateway = LLMGateway(session)
+                    prompt = (
+                        "Analyze the following logs. Use the static signals as hints.\n"
+                        f"Static signals: {json.dumps(signals)}\n\n"
+                        f"LOGS:\n{cleaned[:120_000]}"
+                    )
+                    raw, _provider = await gateway.generate(
+                        user=user,
+                        operation=LLMOperation.LOG_ANALYSIS,
+                        organization_id=organization_id,
+                        prompt=prompt,
+                        system_prompt=LOG_ANALYSIS_SYSTEM_PROMPT,
+                        explicit_provider=provider_name,
+                    )
+                    result = LogAnalyzeResult.model_validate(_parse_llm_json(raw))
+                except Exception:  # noqa: BLE001
+                    logger.debug(
+                        "Worker gateway log analysis failed; using analyze_log_content"
+                    )
+                    result = await analyze_log_content(
+                        cleaned,
+                        provider_name=provider_name,
+                        session=session,
+                        user_id=user_uuid,
+                    )
+            else:
+                result = await analyze_log_content(
+                    cleaned,
+                    provider_name=provider_name,
+                    session=session,
+                    user_id=user_uuid,
+                )
+
             payload = result.model_dump()
             payload["analysis_id"] = analysis_id
             await repo.update_analysis(

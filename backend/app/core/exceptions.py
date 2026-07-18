@@ -72,3 +72,14 @@ class RateLimitError(AppError):
         **kwargs: Any,
     ) -> None:
         super().__init__(message, code=code, status_code=429, **kwargs)
+
+
+class QuotaExceededError(AppError):
+    def __init__(
+        self,
+        message: str = "Usage quota exceeded.",
+        *,
+        code: str = ErrorCode.QUOTA_EXCEEDED,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(message, code=code, status_code=429, **kwargs)

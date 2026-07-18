@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { ColumnDef } from "@tanstack/react-table";
+import { Archive, ArchiveRestore, Star, Tag, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 import { useForm } from "react-hook-form";
@@ -11,12 +12,14 @@ import { useOrgRole } from "@/components/app-shell/use-org-role";
 import { CodeBlock } from "@/components/data-display/code-block";
 import { DataTable } from "@/components/data-display/data-table";
 import { PageHeader } from "@/components/data-display/page-header";
+import { SectionHeader } from "@/components/data-display/section-header";
 import { CodeEditor } from "@/components/editors/code-editor";
 import { DiffEditor } from "@/components/editors/diff-editor";
 import { ConfirmationDialog } from "@/components/feedback/confirmation-dialog";
 import { ErrorState } from "@/components/feedback/error-state";
 import { LoadingState } from "@/components/feedback/loading-state";
 import { PermissionGate } from "@/components/permissions/permission-gate";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -45,12 +48,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { artifactTypeLabel } from "@/features/artifacts/constants";
 import {
+  useAddArtifactTag,
+  useArchiveArtifact,
   useArtifact,
   useArtifactDiff,
+  useArtifactTags,
   useArtifactVersion,
   useArtifactVersions,
   useCreateVersion,
   useDeleteArtifact,
+  useFavoriteArtifact,
+  useRemoveArtifactTag,
   useRestoreVersion,
   useUpdateArtifact,
 } from "@/features/artifacts/hooks";
@@ -60,17 +68,148 @@ import {
   type ArtifactUpdateFormValues,
   type ArtifactVersionFormValues,
 } from "@/features/artifacts/schemas";
-import type { ArtifactVersionResponse } from "@/features/artifacts/types";
+import type { ArtifactTagResponse, ArtifactVersionResponse } from "@/features/artifacts/types";
 import { isApiClientError } from "@/lib/api/errors";
 import { formatDateTime } from "@/lib/formatters/date";
+import { cn } from "@/lib/utils/cn";
+import { useWorkspaceStore } from "@/store/workspace-store";
 
 type ArtifactDetailProps = {
   artifactId: string;
 };
 
+function ArtifactTagEditor({
+  artifactId,
+  tagNames,
+  organizationId,
+}: {
+  artifactId: string;
+  tagNames: string[];
+  organizationId: string | null;
+}) {
+  const [newTagName, setNewTagName] = React.useState("");
+  const [selectedExisting, setSelectedExisting] = React.useState<string>("");
+
+  const tagsQuery = useArtifactTags({ organization_id: organizationId });
+  const addTagMutation = useAddArtifactTag(artifactId);
+  const removeTagMutation = useRemoveArtifactTag(artifactId);
+
+  const tagIdByName = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const tag of tagsQuery.data ?? []) {
+      map.set(tag.name.toLowerCase(), tag.id);
+    }
+    return map;
+  }, [tagsQuery.data]);
+
+  const handleAdd = async () => {
+    const name = newTagName.trim() || selectedExisting;
+    if (!name) {
+      return;
+    }
+    try {
+      await addTagMutation.mutateAsync({ name });
+      toast.success(`Added tag "${name}"`);
+      setNewTagName("");
+      setSelectedExisting("");
+    } catch (err) {
+      toast.error(isApiClientError(err) ? err.message : "Failed to add tag");
+    }
+  };
+
+  const handleRemove = async (name: string) => {
+    const tagId = tagIdByName.get(name.toLowerCase());
+    if (!tagId) {
+      toast.error("Could not resolve tag ID");
+      return;
+    }
+    try {
+      await removeTagMutation.mutateAsync(tagId);
+      toast.success(`Removed tag "${name}"`);
+    } catch (err) {
+      toast.error(isApiClientError(err) ? err.message : "Failed to remove tag");
+    }
+  };
+
+  const unassignedTags = (tagsQuery.data ?? []).filter(
+    (tag) => !tagNames.some((name) => name.toLowerCase() === tag.name.toLowerCase()),
+  );
+
+  return (
+    <section className="space-y-3">
+      <SectionHeader
+        title="Tags"
+        description="Organize artifacts with labels for filtering and discovery."
+      />
+      <div className="flex flex-wrap gap-2">
+        {tagNames.length > 0 ? (
+          tagNames.map((name) => (
+            <Badge key={name} variant="outline" className="gap-1 pr-1">
+              <Tag className="h-3 w-3" aria-hidden />
+              {name}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5"
+                aria-label={`Remove tag ${name}`}
+                disabled={removeTagMutation.isPending}
+                onClick={() => void handleRemove(name)}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </Badge>
+          ))
+        ) : (
+          <p className="text-muted-foreground text-sm">No tags assigned.</p>
+        )}
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-[10rem] space-y-1">
+          <label className="text-muted-foreground text-xs" htmlFor="new-tag-name">
+            New tag
+          </label>
+          <Input
+            id="new-tag-name"
+            placeholder="Tag name"
+            value={newTagName}
+            onChange={(event) => setNewTagName(event.target.value)}
+          />
+        </div>
+        {unassignedTags.length > 0 ? (
+          <div className="min-w-[10rem] space-y-1">
+            <label className="text-muted-foreground text-xs">Existing tag</label>
+            <Select value={selectedExisting} onValueChange={setSelectedExisting}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select tag" />
+              </SelectTrigger>
+              <SelectContent>
+                {unassignedTags.map((tag: ArtifactTagResponse) => (
+                  <SelectItem key={tag.id} value={tag.name}>
+                    {tag.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
+        <Button
+          type="button"
+          size="sm"
+          disabled={addTagMutation.isPending || (!newTagName.trim() && !selectedExisting)}
+          onClick={() => void handleAdd()}
+        >
+          Add tag
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 export function ArtifactDetail({ artifactId }: ArtifactDetailProps) {
   const router = useRouter();
   const role = useOrgRole();
+  const organizationId = useWorkspaceStore((s) => s.currentOrganizationId);
   const [editOpen, setEditOpen] = React.useState(false);
   const [versionOpen, setVersionOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
@@ -87,6 +226,8 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps) {
   const createVersionMutation = useCreateVersion(artifactId);
   const restoreMutation = useRestoreVersion(artifactId);
   const deleteMutation = useDeleteArtifact();
+  const favoriteMutation = useFavoriteArtifact();
+  const archiveMutation = useArchiveArtifact(artifactId);
 
   const versions = versionsQuery.data?.items ?? [];
   const resolvedFromVersion =
@@ -213,6 +354,34 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps) {
     }
   };
 
+  const handleFavoriteToggle = async () => {
+    if (!data) {
+      return;
+    }
+    try {
+      await favoriteMutation.mutateAsync({
+        artifactId,
+        favorited: Boolean(data.is_favorited),
+      });
+      toast.success(data.is_favorited ? "Removed from favorites" : "Added to favorites");
+    } catch (err) {
+      toast.error(isApiClientError(err) ? err.message : "Failed to update favorite");
+    }
+  };
+
+  const handleArchiveToggle = async () => {
+    if (!data) {
+      return;
+    }
+    const isArchived = Boolean(data.archived_at);
+    try {
+      await archiveMutation.mutateAsync(isArchived);
+      toast.success(isArchived ? "Artifact unarchived" : "Artifact archived");
+    } catch (err) {
+      toast.error(isApiClientError(err) ? err.message : "Failed to update archive status");
+    }
+  };
+
   if (isLoading) {
     return <LoadingState label="Loading artifact…" />;
   }
@@ -234,6 +403,38 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps) {
         description={`${artifactTypeLabel(data.artifact_type)} · v${data.current_version_number ?? "—"}`}
         actions={
           <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={favoriteMutation.isPending}
+              onClick={() => void handleFavoriteToggle()}
+            >
+              <Star
+                className={cn(
+                  "h-4 w-4",
+                  data.is_favorited ? "fill-warning text-warning" : undefined,
+                )}
+              />
+              {data.is_favorited ? "Unfavorite" : "Favorite"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={archiveMutation.isPending}
+              onClick={() => void handleArchiveToggle()}
+            >
+              {data.archived_at ? (
+                <>
+                  <ArchiveRestore className="h-4 w-4" />
+                  Unarchive
+                </>
+              ) : (
+                <>
+                  <Archive className="h-4 w-4" />
+                  Archive
+                </>
+              )}
+            </Button>
             <PermissionGate permission="artifact.write" role={role}>
               <Button type="button" variant="outline" onClick={() => setEditOpen(true)}>
                 Edit details
@@ -252,6 +453,19 @@ export function ArtifactDetail({ artifactId }: ArtifactDetailProps) {
       {data.description ? (
         <p className="text-muted-foreground text-sm">{data.description}</p>
       ) : null}
+
+      {data.archived_at ? (
+        <Badge variant="secondary" className="gap-1">
+          <Archive className="h-3 w-3" aria-hidden />
+          Archived {formatDateTime(data.archived_at)}
+        </Badge>
+      ) : null}
+
+      <ArtifactTagEditor
+        artifactId={artifactId}
+        tagNames={data.tags ?? []}
+        organizationId={organizationId}
+      />
 
       <Tabs defaultValue="content">
         <TabsList>

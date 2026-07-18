@@ -11,6 +11,7 @@ from app.core.exceptions import (
     NotFoundError,
     ValidationAppError,
 )
+from app.core.logging import get_logger
 from app.models.organization import Organization, OrganizationMember, OrgRole
 from app.models.user import User
 from app.repositories.organization_repository import OrganizationRepository
@@ -25,7 +26,10 @@ from app.schemas.organization import (
 )
 from app.schemas.pagination import Page, PageParams
 from app.services.audit_service import AuditRequestContext, AuditService
+from app.services.onboarding_service import OnboardingService
 from app.services.rbac import OrganizationAuthService, Permission
+
+logger = get_logger(__name__)
 
 _SLUG_INVALID = re.compile(r"[^a-z0-9-]")
 _SLUG_MULTI_HYPHEN = re.compile(r"-+")
@@ -96,6 +100,12 @@ class OrganizationService:
             metadata={"slug": org.slug},
             fail_on_error=True,
         )
+        try:
+            await OnboardingService(self.session).mark_flag(
+                user.id, organization_created=True
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to mark organization_created onboarding flag")
         return self._to_org_response(org)
 
     async def list_for_user(

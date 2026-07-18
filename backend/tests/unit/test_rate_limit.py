@@ -164,11 +164,11 @@ async def test_http_rate_limits_and_stream_precheck(
 
     app.dependency_overrides[get_db] = override_get_db
     monkeypatch.setattr(
-        "app.services.chat_service.get_llm_provider",
+        "app.services.llm.factory.get_llm_provider",
         lambda provider_name=None: fake_llm,
     )
     monkeypatch.setattr(
-        "app.services.llm.factory.get_llm_provider",
+        "app.services.provider_service.get_llm_provider",
         lambda provider_name=None: fake_llm,
     )
 

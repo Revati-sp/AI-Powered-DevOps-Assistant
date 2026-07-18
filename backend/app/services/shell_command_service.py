@@ -6,12 +6,13 @@ import re
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.generated_artifact import ArtifactType
+from app.models.provider_config import LLMOperation
 from app.models.user import User
 from app.repositories.artifact_repository import ArtifactRepository
 from app.schemas.generators import ShellCommandRequest, ShellCommandResponse
 from app.services.audit_service import AuditRequestContext
 from app.services.generator_artifact_helper import apply_generator_policies_and_save
-from app.services.llm.factory import get_llm_provider
+from app.services.llm.gateway import LLMGateway
 from app.services.llm.prompts import SHELL_COMMAND_SYSTEM_PROMPT
 from app.utils.command_risk import classify_command_risk
 from app.utils.sanitization import sanitize_text
@@ -54,14 +55,19 @@ class ShellCommandService:
         command, explanation = _heuristic_command(payload)
 
         try:
-            provider = get_llm_provider(payload.provider)
+            gateway = LLMGateway(self.session)
             prompt = (
                 f"OS={payload.operating_system} shell={payload.shell}\n"
                 f"Request: {request}\n"
                 "Return a single safe command as JSON."
             )
-            raw = await provider.generate(
-                prompt, system_prompt=SHELL_COMMAND_SYSTEM_PROMPT
+            raw, _provider = await gateway.generate(
+                user=user,
+                operation=LLMOperation.SHELL_COMMAND,
+                organization_id=payload.organization_id,
+                prompt=prompt,
+                system_prompt=SHELL_COMMAND_SYSTEM_PROMPT,
+                explicit_provider=payload.provider,
             )
             text = raw.strip()
             if text.startswith("```"):

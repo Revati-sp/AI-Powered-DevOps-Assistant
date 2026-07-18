@@ -13,6 +13,7 @@ from app.core.exceptions import LLMProviderError, NotFoundError
 from app.core.logging import get_logger
 from app.models.conversation import Conversation
 from app.models.message import MessageRole
+from app.models.provider_config import LLMOperation
 from app.models.user import User
 from app.repositories.conversation_repository import ConversationRepository
 from app.schemas.chat import (
@@ -23,9 +24,11 @@ from app.schemas.chat import (
 )
 from app.schemas.pagination import Page
 from app.services.llm.base import LLMProvider
-from app.services.llm.factory import get_llm_provider
+from app.services.llm.gateway import LLMGateway
 from app.services.llm.prompts import DEVOPS_SYSTEM_PROMPT
+from app.services.onboarding_service import OnboardingService
 from app.services.rbac import OrganizationAuthService, Permission
+from app.services.usage_quota_service import UsageQuotaService
 from app.utils.sanitization import sanitize_text
 from app.utils.sse import encode_sse
 
@@ -49,6 +52,14 @@ class ChatService:
         )
         return organization_id
 
+    async def _mark_first_chat(self, user_id: UUID) -> None:
+        try:
+            await OnboardingService(self.session).mark_flag(
+                user_id, first_chat_completed=True
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to mark first_chat_completed onboarding flag")
+
     def _build_prompt(self, history_block: str, message: str) -> str:
         return (
             "Conversation history (most recent first limited):\n"
@@ -59,10 +70,10 @@ class ChatService:
 
     async def chat(self, user: User, payload: ChatRequest) -> ChatResponse:
         message = sanitize_text(payload.message, max_length=8000)
-        provider = get_llm_provider(payload.provider)
         organization_id = await self._resolve_organization_id(
             user, payload.organization_id
         )
+        initial_provider = (payload.provider or self.settings.llm_provider).lower()
 
         if payload.conversation_id:
             conversation = await self.conversations.get_for_user(
@@ -75,7 +86,7 @@ class ChatService:
             conversation = await self.conversations.create(
                 user_id=user.id,
                 title=title,
-                provider=provider.name,
+                provider=initial_provider,
                 organization_id=organization_id,
             )
 
@@ -87,7 +98,15 @@ class ChatService:
         )
         prompt = self._build_prompt(history_block, message)
 
-        answer = await provider.generate(prompt, system_prompt=DEVOPS_SYSTEM_PROMPT)
+        gateway = LLMGateway(self.session)
+        answer, provider_name = await gateway.generate(
+            user=user,
+            operation=LLMOperation.CHAT,
+            organization_id=organization_id,
+            prompt=prompt,
+            system_prompt=DEVOPS_SYSTEM_PROMPT,
+            explicit_provider=payload.provider,
+        )
         await self.conversations.add_message(
             conversation_id=conversation.id,
             role=MessageRole.USER,
@@ -98,13 +117,14 @@ class ChatService:
             role=MessageRole.ASSISTANT,
             content=answer,
         )
-        conversation.provider = provider.name
+        conversation.provider = provider_name
+        await self._mark_first_chat(user.id)
         await self.session.flush()
 
         return ChatResponse(
             conversation_id=conversation.id,
             answer=answer,
-            provider=provider.name,
+            provider=provider_name,
             created_at=assistant_message.created_at,
         )
 
@@ -116,9 +136,16 @@ class ChatService:
         Raises HTTP-safe application errors before SSE begins.
         """
         message = sanitize_text(payload.message, max_length=8000)
-        provider = get_llm_provider(payload.provider)
         organization_id = await self._resolve_organization_id(
             user, payload.organization_id
+        )
+        gateway = LLMGateway(self.session)
+        provider, provider_name = await gateway.resolve_stream_provider(
+            user=user,
+            operation=LLMOperation.CHAT,
+            organization_id=organization_id,
+            estimated_tokens=max(1, len(message) // 4),
+            explicit_provider=payload.provider,
         )
 
         if payload.conversation_id:
@@ -132,7 +159,7 @@ class ChatService:
             conversation = await self.conversations.create(
                 user_id=user.id,
                 title=title,
-                provider=provider.name,
+                provider=provider_name,
                 organization_id=organization_id,
             )
 
@@ -141,7 +168,7 @@ class ChatService:
             role=MessageRole.USER,
             content=message,
         )
-        conversation.provider = provider.name
+        conversation.provider = provider_name
         await self.session.flush()
         await self.session.commit()
 
@@ -153,7 +180,7 @@ class ChatService:
             f"{msg.role.value.upper()}: {msg.content}" for msg in prior
         )
         prompt = self._build_prompt(history_block, message)
-        return conversation, prompt, provider.name, provider
+        return conversation, prompt, provider_name, provider
 
     async def iter_stream_events(
         self,
@@ -190,6 +217,17 @@ class ChatService:
                     role=MessageRole.ASSISTANT,
                     content=accumulated,
                 )
+                await UsageQuotaService(self.session).record_llm_usage(
+                    user_id=conversation.user_id,
+                    organization_id=conversation.organization_id,
+                    operation=LLMOperation.CHAT.value,
+                    provider=provider_name,
+                    model=None,
+                    input_tokens=max(1, len(prompt) // 4),
+                    output_tokens=max(1, len(accumulated) // 4),
+                    is_estimated=True,
+                )
+                await self._mark_first_chat(conversation.user_id)
                 await self.session.commit()
                 await queue.put(
                     (

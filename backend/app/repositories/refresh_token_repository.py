@@ -91,3 +91,47 @@ class RefreshTokenRepository:
         )
         await self.session.flush()
         return int(cast(CursorResult[Any], result).rowcount or 0)
+
+    async def revoke_all_except_jti(
+        self, user_id: UUID, *, keep_jti: str, reason: str
+    ) -> int:
+        now = datetime.now(UTC)
+        result = await self.session.execute(
+            update(RefreshToken)
+            .where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.jti != keep_jti,
+            )
+            .values(revoked_at=now, revoked_reason=reason)
+        )
+        await self.session.flush()
+        return int(cast(CursorResult[Any], result).rowcount or 0)
+
+    async def list_for_user(self, user_id: UUID) -> list[RefreshToken]:
+        result = await self.session.execute(
+            select(RefreshToken)
+            .where(RefreshToken.user_id == user_id)
+            .order_by(RefreshToken.issued_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_by_id_for_user(
+        self, token_id: UUID, user_id: UUID
+    ) -> RefreshToken | None:
+        result = await self.session.execute(
+            select(RefreshToken).where(
+                RefreshToken.id == token_id,
+                RefreshToken.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_jti_for_user(self, jti: str, user_id: UUID) -> RefreshToken | None:
+        result = await self.session.execute(
+            select(RefreshToken).where(
+                RefreshToken.jti == jti,
+                RefreshToken.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()

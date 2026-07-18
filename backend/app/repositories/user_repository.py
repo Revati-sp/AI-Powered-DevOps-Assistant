@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -52,6 +53,15 @@ class UserRepository:
         if user is None:
             return None
         user.hashed_password = hashed_password
+        await self.session.flush()
+        await self.session.refresh(user)
+        return user
+
+    async def mark_email_verified(self, user_id: UUID) -> User | None:
+        user = await self.get_by_id(user_id)
+        if user is None:
+            return None
+        user.email_verified_at = datetime.now(UTC)
         await self.session.flush()
         await self.session.refresh(user)
         return user

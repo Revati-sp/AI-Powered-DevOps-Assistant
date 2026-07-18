@@ -48,6 +48,19 @@ class Settings(BaseSettings):
     password_bcrypt_rounds: int = 12
     password_reject_common: bool = True
 
+    email_enabled: bool = False
+    email_verification_required: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_use_tls: bool = True
+    password_reset_token_minutes: int = 60
+    email_verification_token_minutes: int = 1440
+    invitation_expire_hours: int = 168
+    frontend_base_url: str = "http://localhost:3000"
+
     database_url: str = (
         "postgresql+asyncpg://devops:devops@localhost:5432/devops_assistant"
     )
@@ -71,6 +84,14 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
     metrics_require_auth: bool = False
     metrics_allowed_ips: str = ""
+
+    provider_circuit_redis_prefix: str = "devops-assistant:circuit-breaker"
+    provider_circuit_failure_threshold: int = 5
+    provider_circuit_recovery_seconds: int = 60
+    provider_circuit_state_ttl_seconds: int = 3600
+    usage_default_daily_token_limit: int | None = None
+    usage_default_monthly_token_limit: int | None = None
+    usage_enforce_personal_quotas: bool = False
 
     gemini_api_key: str = ""
     gemini_model: str = "gemini-1.5-flash"

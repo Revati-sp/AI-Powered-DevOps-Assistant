@@ -13,16 +13,20 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.routing import Match
 
 from app.api.routes import (
+    admin_providers,
     artifacts,
     auth,
     chat,
     generators,
     health,
+    invitations,
     logs,
+    org_providers,
     organizations,
     policies,
     reviews,
     tasks,
+    usage,
     users,
 )
 from app.core.config import get_settings
@@ -243,3 +247,7 @@ app.include_router(artifacts.router, prefix=api_prefix)
 app.include_router(policies.router, prefix=api_prefix)
 app.include_router(policies.audit_router, prefix=api_prefix)
 app.include_router(organizations.router, prefix=api_prefix)
+app.include_router(invitations.router, prefix=api_prefix)
+app.include_router(admin_providers.router, prefix=api_prefix)
+app.include_router(org_providers.router, prefix=api_prefix)
+app.include_router(usage.router, prefix=api_prefix)

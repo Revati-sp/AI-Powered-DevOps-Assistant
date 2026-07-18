@@ -6,12 +6,13 @@ import re
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.generated_artifact import ArtifactType
+from app.models.provider_config import LLMOperation
 from app.models.user import User
 from app.repositories.artifact_repository import ArtifactRepository
 from app.schemas.generators import DockerfileRequest, DockerfileResponse
 from app.services.audit_service import AuditRequestContext
 from app.services.generator_artifact_helper import apply_generator_policies_and_save
-from app.services.llm.factory import get_llm_provider
+from app.services.llm.gateway import LLMGateway
 from app.services.llm.prompts import DOCKERFILE_SYSTEM_PROMPT
 
 
@@ -125,15 +126,20 @@ class DockerGeneratorService:
     ) -> DockerfileResponse:
         base = _deterministic_dockerfile(payload)
         try:
-            provider = get_llm_provider(payload.provider)
+            gateway = LLMGateway(self.session)
             prompt = (
                 "Improve or validate this Dockerfile generation request. "
                 "Return JSON only.\n"
                 f"Request: {payload.model_dump_json()}\n"
                 f"Baseline:\n{base.content}"
             )
-            raw = await provider.generate(
-                prompt, system_prompt=DOCKERFILE_SYSTEM_PROMPT
+            raw, _provider = await gateway.generate(
+                user=user,
+                operation=LLMOperation.DOCKERFILE_GENERATION,
+                organization_id=payload.organization_id,
+                prompt=prompt,
+                system_prompt=DOCKERFILE_SYSTEM_PROMPT,
+                explicit_provider=payload.provider,
             )
             text = raw.strip()
             if text.startswith("```"):

@@ -6,6 +6,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request
 
 from app.api.dependencies import CurrentUser, DBSession
+from app.schemas.artifact_tags import (
+    ArtifactTagAssignRequest,
+    ArtifactTagCreateRequest,
+    ArtifactTagResponse,
+)
 from app.schemas.artifacts import (
     ArtifactCreateRequest,
     ArtifactDetailResponse,
@@ -43,12 +48,22 @@ async def list_artifacts(
     current_user: CurrentUser,
     pagination: PageParams = Depends(),
     organization_id: UUID | None = None,
+    search: str | None = Query(default=None, max_length=255),
+    tags: list[str] | None = Query(default=None),
+    favorites_only: bool = False,
+    include_archived: bool = False,
+    creator_id: UUID | None = None,
 ) -> APIResponse[Page[ArtifactSummaryResponse]]:
     items, total = await ArtifactService(db).list_artifacts(
         current_user,
         organization_id=organization_id,
         limit=pagination.limit,
         offset=pagination.offset,
+        search=search,
+        tags=tags,
+        favorites_only=favorites_only,
+        include_archived=include_archived,
+        creator_id=creator_id,
     )
     return APIResponse(
         success=True,
@@ -59,6 +74,31 @@ async def list_artifacts(
             offset=pagination.offset,
         ),
     )
+
+
+@router.get("/tags/list", response_model=APIResponse[list[ArtifactTagResponse]])
+async def list_artifact_tags(
+    db: DBSession,
+    current_user: CurrentUser,
+    organization_id: UUID | None = None,
+) -> APIResponse[list[ArtifactTagResponse]]:
+    result = await ArtifactService(db).list_tags(
+        current_user, organization_id=organization_id
+    )
+    return APIResponse(success=True, data=result)
+
+
+@router.post("/tags", response_model=APIResponse[ArtifactTagResponse])
+async def create_artifact_tag(
+    payload: ArtifactTagCreateRequest,
+    db: DBSession,
+    current_user: CurrentUser,
+    organization_id: UUID | None = None,
+) -> APIResponse[ArtifactTagResponse]:
+    result = await ArtifactService(db).create_tag(
+        current_user, payload, organization_id=organization_id
+    )
+    return APIResponse(success=True, data=result)
 
 
 @router.get("/{artifact_id}", response_model=APIResponse[ArtifactDetailResponse])
@@ -194,4 +234,78 @@ async def diff_versions(
         from_version=from_version,
         to_version=to_version,
     )
+    return APIResponse(success=True, data=result)
+
+
+@router.post(
+    "/{artifact_id}/tags",
+    response_model=APIResponse[list[ArtifactTagResponse]],
+)
+async def add_artifact_tag(
+    artifact_id: UUID,
+    payload: ArtifactTagAssignRequest,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> APIResponse[list[ArtifactTagResponse]]:
+    result = await ArtifactService(db).add_tag(current_user, artifact_id, payload)
+    return APIResponse(success=True, data=result)
+
+
+@router.delete(
+    "/{artifact_id}/tags/{tag_id}",
+    response_model=APIResponse[list[ArtifactTagResponse]],
+)
+async def remove_artifact_tag(
+    artifact_id: UUID,
+    tag_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> APIResponse[list[ArtifactTagResponse]]:
+    result = await ArtifactService(db).remove_tag(current_user, artifact_id, tag_id)
+    return APIResponse(success=True, data=result)
+
+
+@router.post("/{artifact_id}/favorite", response_model=APIResponse[dict[str, Any]])
+async def favorite_artifact(
+    artifact_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> APIResponse[dict[str, Any]]:
+    await ArtifactService(db).favorite(current_user, artifact_id)
+    return APIResponse(success=True, data={}, message="Artifact favorited")
+
+
+@router.delete("/{artifact_id}/favorite", response_model=APIResponse[dict[str, Any]])
+async def unfavorite_artifact(
+    artifact_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> APIResponse[dict[str, Any]]:
+    await ArtifactService(db).unfavorite(current_user, artifact_id)
+    return APIResponse(success=True, data={}, message="Artifact unfavorited")
+
+
+@router.post(
+    "/{artifact_id}/archive",
+    response_model=APIResponse[ArtifactSummaryResponse],
+)
+async def archive_artifact(
+    artifact_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> APIResponse[ArtifactSummaryResponse]:
+    result = await ArtifactService(db).archive(current_user, artifact_id)
+    return APIResponse(success=True, data=result)
+
+
+@router.post(
+    "/{artifact_id}/unarchive",
+    response_model=APIResponse[ArtifactSummaryResponse],
+)
+async def unarchive_artifact(
+    artifact_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> APIResponse[ArtifactSummaryResponse]:
+    result = await ArtifactService(db).unarchive(current_user, artifact_id)
     return APIResponse(success=True, data=result)

@@ -8,6 +8,7 @@ import { RecentActivity } from "@/components/dashboard/recent-activity";
 import { SummaryCards } from "@/components/dashboard/summary-cards";
 import { TaskStatusChart } from "@/components/dashboard/task-status-chart";
 import { WorkspaceStatus } from "@/components/dashboard/workspace-status";
+import { WelcomeBanner } from "@/components/onboarding/welcome-banner";
 import { PageHeader } from "@/components/data-display/page-header";
 import { ErrorState } from "@/components/feedback/error-state";
 import { fetchDashboardSnapshot } from "@/features/dashboard/api";
@@ -51,6 +52,7 @@ export function DashboardPage() {
         />
       ) : (
         <>
+          <WelcomeBanner />
           <SummaryCards snapshot={data} loading={isLoading} />
 
           <div className="grid gap-4 xl:grid-cols-3">

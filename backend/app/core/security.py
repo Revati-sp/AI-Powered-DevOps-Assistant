@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import secrets
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Any, Literal
@@ -165,13 +166,21 @@ def create_refresh_token(
     return str(token)
 
 
-def hash_refresh_token(raw_token: str) -> str:
+def hash_secure_token(raw_token: str) -> str:
     settings = get_settings()
     return hmac.new(
         settings.refresh_token_pepper.encode("utf-8"),
         raw_token.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
+
+
+def hash_refresh_token(raw_token: str) -> str:
+    return hash_secure_token(raw_token)
+
+
+def generate_secure_token() -> str:
+    return secrets.token_urlsafe(32)
 
 
 def decode_token(token: str, expected_type: TokenType) -> dict[str, Any]:

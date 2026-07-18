@@ -7,15 +7,21 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import get_logger
 from app.models.analysis import AnalysisStatus, AnalysisType
+from app.models.provider_config import LLMOperation
 from app.models.user import User
 from app.repositories.artifact_repository import ArtifactRepository
 from app.schemas.logs import AsyncTaskResponse, LogAnalyzeResult
 from app.services.audit_service import AuditRequestContext
 from app.services.llm.factory import get_llm_provider
+from app.services.llm.gateway import LLMGateway
 from app.services.llm.prompts import LOG_ANALYSIS_SYSTEM_PROMPT
 from app.services.task_service import TASK_TYPE_LOG_ANALYSIS, TaskService
+from app.services.usage_quota_service import UsageQuotaService
 from app.utils.sanitization import preview_text, sanitize_text
+
+logger = get_logger(__name__)
 
 ERROR_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"CrashLoopBackOff", re.I), "Kubernetes CrashLoopBackOff"),
@@ -78,15 +84,8 @@ def _parse_llm_json(raw: str) -> dict[str, Any]:
     return json.loads(text)
 
 
-async def analyze_log_content(
-    content: str,
-    *,
-    provider_name: str = "gemini",
-) -> LogAnalyzeResult:
-    cleaned = sanitize_text(content, max_length=500_000)
-    signals = _static_log_signals(cleaned)
-
-    fallback = LogAnalyzeResult(
+def _fallback_result(signals: dict[str, Any]) -> LogAnalyzeResult:
+    return LogAnalyzeResult(
         summary="Static analysis completed. LLM enrichment unavailable or failed.",
         severity=signals["severity_hint"],
         detected_errors=signals["detected_errors"],
@@ -108,6 +107,23 @@ async def analyze_log_content(
         confidence=0.45,
     )
 
+
+async def analyze_log_content(
+    content: str,
+    *,
+    provider_name: str = "gemini",
+    session: AsyncSession | None = None,
+    user_id: UUID | None = None,
+) -> LogAnalyzeResult:
+    """Analyze logs with static signals + LLM enrichment.
+
+    When ``session`` and ``user_id`` are provided, records estimated usage after
+    a successful LLM call (Celery-friendly path without a full User ORM load).
+    """
+    cleaned = sanitize_text(content, max_length=500_000)
+    signals = _static_log_signals(cleaned)
+    fallback = _fallback_result(signals)
+
     try:
         provider = get_llm_provider(provider_name)
         prompt = (
@@ -117,7 +133,19 @@ async def analyze_log_content(
         )
         raw = await provider.generate(prompt, system_prompt=LOG_ANALYSIS_SYSTEM_PROMPT)
         data = _parse_llm_json(raw)
-        return LogAnalyzeResult.model_validate(data)
+        result = LogAnalyzeResult.model_validate(data)
+        if session is not None and user_id is not None:
+            await UsageQuotaService(session).record_llm_usage(
+                user_id=user_id,
+                organization_id=None,
+                operation=LLMOperation.LOG_ANALYSIS.value,
+                provider=provider.name,
+                model=None,
+                input_tokens=max(1, len(prompt) // 4),
+                output_tokens=max(1, len(raw) // 4),
+                is_estimated=True,
+            )
+        return result
     except Exception:  # noqa: BLE001
         return fallback
 
@@ -135,9 +163,30 @@ class LogAnalyzerService:
         *,
         provider_name: str = "gemini",
         persist: bool = True,
+        organization_id: UUID | None = None,
     ) -> LogAnalyzeResult:
         cleaned = sanitize_text(content, max_length=500_000)
-        result = await analyze_log_content(cleaned, provider_name=provider_name)
+        signals = _static_log_signals(cleaned)
+        fallback = _fallback_result(signals)
+        result = fallback
+        try:
+            gateway = LLMGateway(self.session)
+            prompt = (
+                "Analyze the following logs. Use the static signals as hints.\n"
+                f"Static signals: {json.dumps(signals)}\n\n"
+                f"LOGS:\n{cleaned[:120_000]}"
+            )
+            raw, _provider = await gateway.generate(
+                user=user,
+                operation=LLMOperation.LOG_ANALYSIS,
+                organization_id=organization_id,
+                prompt=prompt,
+                system_prompt=LOG_ANALYSIS_SYSTEM_PROMPT,
+                explicit_provider=provider_name,
+            )
+            result = LogAnalyzeResult.model_validate(_parse_llm_json(raw))
+        except Exception:  # noqa: BLE001
+            logger.debug("Log analysis LLM enrichment failed; using static fallback")
 
         if persist:
             await self.artifacts.create_analysis(

@@ -1,4 +1,6 @@
+from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -42,3 +44,31 @@ class RefreshRequest(BaseModel):
 
 class LogoutRequest(BaseModel):
     refresh_token: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = _password_field()
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = _password_field()
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class SessionResponse(BaseModel):
+    id: UUID
+    created_at: datetime
+    expires_at: datetime
+    revoked: bool
+    approx_ip: str | None = None
+    approx_client: str | None = None
+    is_current: bool = False

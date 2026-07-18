@@ -16,6 +16,8 @@ const PROTECTED_PREFIXES = [
   "/organizations",
   "/tasks",
   "/settings",
+  "/usage",
+  "/onboarding",
 ] as const;
 
 const AUTH_PAGES = new Set(["/login", "/register"]);

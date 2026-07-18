@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any
 
@@ -26,6 +27,8 @@ os.environ.setdefault("MISTRAL_API_KEY", "test-mistral-key")
 os.environ.setdefault("LLM_PROVIDER", "gemini")
 os.environ.setdefault("ALLOWED_ORIGINS", "http://testserver")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
+os.environ.setdefault("EMAIL_ENABLED", "true")
+os.environ.setdefault("FRONTEND_BASE_URL", "http://localhost:3000")
 os.environ.setdefault("ALLOW_INSECURE_LLM_HTTP", "true")
 os.environ.setdefault("SSE_HEARTBEAT_INTERVAL_SECONDS", "0.05")
 os.environ.setdefault("LLM_MAX_RETRIES", "3")
@@ -34,10 +37,49 @@ from app.core.config import get_settings
 from app.core.database import Base, get_db
 from app.core.rate_limit import set_rate_limiter
 from app.main import app
+from app.services.email_service import EmailService, SentEmail
 from app.services.llm.base import LLMProvider, chunk_text
 
 get_settings.cache_clear()
 set_rate_limiter(None)
+
+_EMAIL_OUTBOX: list[SentEmail] = []
+_TOKEN_IN_URL = re.compile(r"token=([A-Za-z0-9_-]+)")
+
+
+def extract_token_from_email(body: str) -> str:
+    match = _TOKEN_IN_URL.search(body)
+    assert match is not None, f"No token found in email body: {body!r}"
+    return match.group(1)
+
+
+@pytest.fixture(autouse=True)
+def email_outbox(monkeypatch: pytest.MonkeyPatch) -> list[SentEmail]:
+    _EMAIL_OUTBOX.clear()
+
+    async def capture_send(
+        self: EmailService,
+        *,
+        to: str,
+        subject: str,
+        body_text: str,
+        body_html: str | None = None,
+    ) -> None:
+        _EMAIL_OUTBOX.append(
+            SentEmail(
+                to=to,
+                subject=subject,
+                body_text=body_text,
+                body_html=body_html,
+            )
+        )
+        if not self.settings.email_enabled:
+            return
+        if self._smtp_configured():
+            await EmailService._send_smtp(self, _EMAIL_OUTBOX[-1])
+
+    monkeypatch.setattr(EmailService, "send", capture_send)
+    return _EMAIL_OUTBOX
 
 
 class FakeLLMProvider(LLMProvider):
@@ -147,23 +189,11 @@ async def client(
         lambda provider_name=None: fake_llm,
     )
     monkeypatch.setattr(
-        "app.services.chat_service.get_llm_provider",
+        "app.services.provider_service.get_llm_provider",
         lambda provider_name=None: fake_llm,
     )
     monkeypatch.setattr(
         "app.services.log_analyzer.get_llm_provider",
-        lambda provider_name=None: fake_llm,
-    )
-    monkeypatch.setattr(
-        "app.services.docker_generator.get_llm_provider",
-        lambda provider_name=None: fake_llm,
-    )
-    monkeypatch.setattr(
-        "app.services.shell_command_service.get_llm_provider",
-        lambda provider_name=None: fake_llm,
-    )
-    monkeypatch.setattr(
-        "app.services.security_review_service.get_llm_provider",
         lambda provider_name=None: fake_llm,
     )
 

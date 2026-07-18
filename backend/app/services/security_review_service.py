@@ -7,11 +7,12 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.analysis import AnalysisStatus, AnalysisType
+from app.models.provider_config import LLMOperation
 from app.models.user import User
 from app.repositories.artifact_repository import ArtifactRepository
 from app.schemas.reviews import ReviewFinding, ReviewRequest, ReviewResponse
 from app.services.audit_service import AuditRequestContext, AuditService
-from app.services.llm.factory import get_llm_provider
+from app.services.llm.gateway import LLMGateway
 from app.services.llm.prompts import REVIEW_SYSTEM_PROMPT
 from app.services.policy_service import PolicyService
 from app.services.rbac import OrganizationAuthService, Permission
@@ -248,13 +249,20 @@ class SecurityReviewService:
         improved_content: str | None = None
 
         try:
-            provider = get_llm_provider(payload.provider)
+            gateway = LLMGateway(self.session)
             prompt = (
                 f"Config type: {payload.type}\n"
                 f"Static findings: {json.dumps([f.model_dump() for f in deterministic_findings])}\n\n"
                 f"CONTENT:\n{content[:100_000]}"
             )
-            raw = await provider.generate(prompt, system_prompt=REVIEW_SYSTEM_PROMPT)
+            raw, _provider = await gateway.generate(
+                user=user,
+                operation=LLMOperation.CONFIGURATION_REVIEW,
+                organization_id=payload.organization_id,
+                prompt=prompt,
+                system_prompt=REVIEW_SYSTEM_PROMPT,
+                explicit_provider=payload.provider,
+            )
             text = raw.strip()
             if text.startswith("```"):
                 text = re.sub(r"^```(?:json)?\s*", "", text)

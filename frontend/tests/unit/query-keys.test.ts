@@ -46,4 +46,21 @@ describe("queryKeys", () => {
     expect(queryKeys.tasks.list({})).toEqual(["tasks", "list", {}]);
     expect(queryKeys.tasks.detail("t1")).toEqual(["tasks", "detail", "t1"]);
   });
+
+  it("builds usage, onboarding, and provider keys", () => {
+    expect(queryKeys.usage.me()).toEqual(["usage", "me"]);
+    expect(queryKeys.usage.org("org-1")).toEqual(["usage", "org", "org-1"]);
+    expect(queryKeys.onboarding.me()).toEqual(["onboarding", "me"]);
+    expect(queryKeys.providers.orgConfigs("org-1")).toEqual([
+      "providers",
+      "org",
+      "org-1",
+      "configs",
+    ]);
+    expect(queryKeys.artifacts.tags({ organization_id: "o1" })).toEqual([
+      "artifacts",
+      "tags",
+      { organization_id: "o1" },
+    ]);
+  });
 });

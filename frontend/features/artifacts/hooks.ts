@@ -5,22 +5,34 @@ import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from "@ta
 import { queryKeys } from "@/lib/api/query-keys";
 
 import {
+  addArtifactTag,
+  archiveArtifact,
   createArtifact,
+  createTag,
   createVersion,
   deleteArtifact,
   diffVersions,
+  favoriteArtifact,
   getArtifact,
   getVersion,
   listArtifacts,
+  listTags,
   listVersions,
+  removeArtifactTag,
   restoreVersion,
+  unfavoriteArtifact,
+  unarchiveArtifact,
   updateArtifact,
   type ListArtifactsParams,
+  type ListTagsParams,
 } from "./api";
 import type {
   ArtifactCreateRequest,
   ArtifactDetailResponse,
   ArtifactDiffResponse,
+  ArtifactTagAssignRequest,
+  ArtifactTagCreateRequest,
+  ArtifactTagResponse,
   ArtifactsPage,
   ArtifactUpdateRequest,
   ArtifactVersionCreateRequest,
@@ -47,6 +59,17 @@ export function useArtifact(
     queryKey: queryKeys.artifacts.detail(artifactId),
     queryFn: () => getArtifact(artifactId),
     enabled: Boolean(artifactId),
+    ...options,
+  });
+}
+
+export function useArtifactTags(
+  params: ListTagsParams = {},
+  options?: Omit<UseQueryOptions<ArtifactTagResponse[]>, "queryKey" | "queryFn">,
+) {
+  return useQuery({
+    queryKey: queryKeys.artifacts.tags(params),
+    queryFn: () => listTags(params),
     ...options,
   });
 }
@@ -156,6 +179,64 @@ export function useRestoreVersion(artifactId: string) {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.versions.all(artifactId),
       });
+    },
+  });
+}
+
+export function useCreateTag(params: ListTagsParams = {}) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ArtifactTagCreateRequest) => createTag(body, params),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.tags(params) });
+    },
+  });
+}
+
+export function useAddArtifactTag(artifactId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ArtifactTagAssignRequest) => addArtifactTag(artifactId, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.all() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.detail(artifactId) });
+    },
+  });
+}
+
+export function useRemoveArtifactTag(artifactId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (tagId: string) => removeArtifactTag(artifactId, tagId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.all() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.detail(artifactId) });
+    },
+  });
+}
+
+export function useFavoriteArtifact() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ artifactId, favorited }: { artifactId: string; favorited: boolean }) =>
+      favorited ? unfavoriteArtifact(artifactId) : favoriteArtifact(artifactId),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.all() });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.artifacts.detail(variables.artifactId),
+      });
+    },
+  });
+}
+
+export function useArchiveArtifact(artifactId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (archived: boolean) =>
+      archived ? unarchiveArtifact(artifactId) : archiveArtifact(artifactId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.all() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.detail(artifactId) });
     },
   });
 }

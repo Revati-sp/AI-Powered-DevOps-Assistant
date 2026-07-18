@@ -8,6 +8,10 @@ import type {
   ArtifactDiffResponse,
   ArtifactRestoreResponse,
   ArtifactsPage,
+  ArtifactSummaryResponse,
+  ArtifactTagAssignRequest,
+  ArtifactTagCreateRequest,
+  ArtifactTagResponse,
   ArtifactUpdateRequest,
   ArtifactVersionCreateRequest,
   ArtifactVersionResponse,
@@ -18,6 +22,10 @@ export type ListArtifactsParams = {
   organization_id?: string | null;
   limit?: number;
   offset?: number;
+  search?: string;
+  tags?: string[];
+  favorites_only?: boolean;
+  include_archived?: boolean;
 };
 
 export function listArtifacts(params: ListArtifactsParams = {}): Promise<ArtifactsPage> {
@@ -25,6 +33,10 @@ export function listArtifacts(params: ListArtifactsParams = {}): Promise<Artifac
     organization_id: params.organization_id ?? undefined,
     limit: params.limit ?? 20,
     offset: params.offset ?? 0,
+    search: params.search?.trim() || undefined,
+    tags: params.tags?.length ? params.tags : undefined,
+    favorites_only: params.favorites_only ? true : undefined,
+    include_archived: params.include_archived ? true : undefined,
   });
   return apiFetch<ArtifactsPage>(`${endpoints.artifacts.list()}${qs}`);
 }
@@ -103,4 +115,67 @@ export function diffVersions(
     to_version: toVersion,
   });
   return apiFetch<ArtifactDiffResponse>(`${endpoints.artifacts.diff(artifactId)}${qs}`);
+}
+
+export type ListTagsParams = {
+  organization_id?: string | null;
+};
+
+export function listTags(params: ListTagsParams = {}): Promise<ArtifactTagResponse[]> {
+  const qs = buildQueryString({
+    organization_id: params.organization_id ?? undefined,
+  });
+  return apiFetch<ArtifactTagResponse[]>(`${endpoints.artifacts.tagsList()}${qs}`);
+}
+
+export function createTag(
+  body: ArtifactTagCreateRequest,
+  params: ListTagsParams = {},
+): Promise<ArtifactTagResponse> {
+  const qs = buildQueryString({
+    organization_id: params.organization_id ?? undefined,
+  });
+  return apiFetch<ArtifactTagResponse>(`${endpoints.artifacts.tags()}${qs}`, {
+    method: "POST",
+    body,
+  });
+}
+
+export function addArtifactTag(
+  artifactId: string,
+  body: ArtifactTagAssignRequest,
+): Promise<ArtifactTagResponse[]> {
+  return apiFetch<ArtifactTagResponse[]>(endpoints.artifacts.artifactTags(artifactId), {
+    method: "POST",
+    body,
+  });
+}
+
+export function removeArtifactTag(
+  artifactId: string,
+  tagId: string,
+): Promise<ArtifactTagResponse[]> {
+  return apiFetch<ArtifactTagResponse[]>(endpoints.artifacts.artifactTag(artifactId, tagId), {
+    method: "DELETE",
+  });
+}
+
+export function favoriteArtifact(artifactId: string): Promise<void> {
+  return apiFetch<void>(endpoints.artifacts.favorite(artifactId), { method: "POST" });
+}
+
+export function unfavoriteArtifact(artifactId: string): Promise<void> {
+  return apiFetch<void>(endpoints.artifacts.favorite(artifactId), { method: "DELETE" });
+}
+
+export function archiveArtifact(artifactId: string): Promise<ArtifactSummaryResponse> {
+  return apiFetch<ArtifactSummaryResponse>(endpoints.artifacts.archive(artifactId), {
+    method: "POST",
+  });
+}
+
+export function unarchiveArtifact(artifactId: string): Promise<ArtifactSummaryResponse> {
+  return apiFetch<ArtifactSummaryResponse>(endpoints.artifacts.unarchive(artifactId), {
+    method: "POST",
+  });
 }

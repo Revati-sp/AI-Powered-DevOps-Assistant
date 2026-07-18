@@ -7,18 +7,25 @@ import { queryKeys } from "@/lib/api/query-keys";
 import {
   addMember,
   createOrganization,
+  createInvitation,
   deleteOrganization,
   getOrganization,
+  listInvitations,
   listMembers,
   listOrganizations,
   removeMember,
+  resendInvitation,
+  revokeInvitation,
   updateMember,
   updateOrganization,
+  type ListInvitationsParams,
   type ListMembersParams,
   type ListOrganizationsParams,
 } from "./api";
 import type {
   AddMemberRequest,
+  CreateInvitationRequest,
+  InvitationsPage,
   MembersPage,
   OrganizationCreate,
   OrganizationResponse,
@@ -134,6 +141,55 @@ export function useRemoveMember(organizationId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.members.all(organizationId),
+      });
+    },
+  });
+}
+
+export function useInvitations(
+  organizationId: string,
+  params: ListInvitationsParams = {},
+  options?: Omit<UseQueryOptions<InvitationsPage>, "queryKey" | "queryFn">,
+) {
+  return useQuery({
+    queryKey: queryKeys.invitations.list(organizationId, params),
+    queryFn: () => listInvitations(organizationId, params),
+    enabled: Boolean(organizationId),
+    ...options,
+  });
+}
+
+export function useCreateInvitation(organizationId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateInvitationRequest) => createInvitation(organizationId, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.invitations.all(organizationId),
+      });
+    },
+  });
+}
+
+export function useResendInvitation(organizationId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (invitationId: string) => resendInvitation(organizationId, invitationId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.invitations.all(organizationId),
+      });
+    },
+  });
+}
+
+export function useRevokeInvitation(organizationId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (invitationId: string) => revokeInvitation(organizationId, invitationId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.invitations.all(organizationId),
       });
     },
   });

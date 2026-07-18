@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { ColumnDef } from "@tanstack/react-table";
-import { FileCode2, Plus } from "lucide-react";
+import { Archive, FileCode2, Plus, Star } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
 import { useForm } from "react-hook-form";
@@ -17,6 +17,7 @@ import { EmptyState } from "@/components/feedback/empty-state";
 import { ErrorState } from "@/components/feedback/error-state";
 import { LoadingState } from "@/components/feedback/loading-state";
 import { PermissionGate } from "@/components/permissions/permission-gate";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -34,6 +35,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -41,20 +43,36 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   ARTIFACT_TYPE_LABELS,
   ARTIFACT_TYPES,
   artifactTypeLabel,
 } from "@/features/artifacts/constants";
-import { useArtifacts, useCreateArtifact } from "@/features/artifacts/hooks";
+import {
+  useArtifactTags,
+  useArtifacts,
+  useCreateArtifact,
+  useFavoriteArtifact,
+} from "@/features/artifacts/hooks";
 import { artifactCreateSchema, type ArtifactCreateFormValues } from "@/features/artifacts/schemas";
 import type { ArtifactSummaryResponse, ArtifactType } from "@/features/artifacts/types";
 import { isApiClientError } from "@/lib/api/errors";
 import { formatDateTime } from "@/lib/formatters/date";
+import { cn } from "@/lib/utils/cn";
 import { useWorkspaceStore } from "@/store/workspace-store";
 
 const PAGE_SIZE = 20;
+
+function useDebouncedValue<T>(value: T, delayMs = 300): T {
+  const [debounced, setDebounced] = React.useState(value);
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
 
 export function ArtifactsPageClient() {
   const role = useOrgRole();
@@ -62,15 +80,27 @@ export function ArtifactsPageClient() {
   const [pageIndex, setPageIndex] = React.useState(0);
   const [createOpen, setCreateOpen] = React.useState(false);
   const [typeFilter, setTypeFilter] = React.useState<string>("all");
+  const [searchInput, setSearchInput] = React.useState("");
+  const [tagFilter, setTagFilter] = React.useState<string>("all");
+  const [favoritesOnly, setFavoritesOnly] = React.useState(false);
+  const [includeArchived, setIncludeArchived] = React.useState(false);
+
+  const debouncedSearch = useDebouncedValue(searchInput);
 
   const filters = {
     organization_id: organizationId,
     limit: PAGE_SIZE,
     offset: pageIndex * PAGE_SIZE,
+    search: debouncedSearch || undefined,
+    tags: tagFilter !== "all" ? [tagFilter] : undefined,
+    favorites_only: favoritesOnly,
+    include_archived: includeArchived,
   };
 
   const { data, isLoading, isError, error, refetch } = useArtifacts(filters);
+  const tagsQuery = useArtifactTags({ organization_id: organizationId });
   const createMutation = useCreateArtifact();
+  const favoriteMutation = useFavoriteArtifact();
 
   const form = useForm<ArtifactCreateFormValues>({
     resolver: zodResolver(artifactCreateSchema),
@@ -101,24 +131,84 @@ export function ArtifactsPageClient() {
     return rows.filter((item) => item.artifact_type === typeFilter);
   }, [data?.items, typeFilter]);
 
+  const toggleFavorite = React.useCallback(
+    async (artifact: ArtifactSummaryResponse) => {
+      try {
+        await favoriteMutation.mutateAsync({
+          artifactId: artifact.id,
+          favorited: Boolean(artifact.is_favorited),
+        });
+      } catch (err) {
+        toast.error(isApiClientError(err) ? err.message : "Failed to update favorite");
+      }
+    },
+    [favoriteMutation],
+  );
+
   const columns = React.useMemo<ColumnDef<ArtifactSummaryResponse>[]>(
     () => [
+      {
+        id: "favorite",
+        header: "",
+        cell: ({ row }) => (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            aria-label={row.original.is_favorited ? "Remove from favorites" : "Add to favorites"}
+            disabled={favoriteMutation.isPending}
+            onClick={() => void toggleFavorite(row.original)}
+          >
+            <Star
+              className={cn(
+                "h-4 w-4",
+                row.original.is_favorited ? "fill-warning text-warning" : "text-muted-foreground",
+              )}
+            />
+          </Button>
+        ),
+      },
       {
         accessorKey: "name",
         header: "Name",
         cell: ({ row }) => (
-          <Link
-            href={`/artifacts/${row.original.id}`}
-            className="text-primary font-medium hover:underline"
-          >
-            {row.original.name}
-          </Link>
+          <div className="space-y-1">
+            <Link
+              href={`/artifacts/${row.original.id}`}
+              className="text-primary font-medium hover:underline"
+            >
+              {row.original.name}
+            </Link>
+            {row.original.archived_at ? (
+              <Badge variant="secondary" className="gap-1">
+                <Archive className="h-3 w-3" aria-hidden />
+                Archived
+              </Badge>
+            ) : null}
+          </div>
         ),
       },
       {
         accessorKey: "artifact_type",
         header: "Type",
         cell: ({ row }) => artifactTypeLabel(row.original.artifact_type),
+      },
+      {
+        id: "tags",
+        header: "Tags",
+        cell: ({ row }) =>
+          row.original.tags && row.original.tags.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {row.original.tags.map((tag) => (
+                <Badge key={tag} variant="outline">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            "—"
+          ),
       },
       {
         accessorKey: "current_version_number",
@@ -131,7 +221,7 @@ export function ArtifactsPageClient() {
         cell: ({ row }) => formatDateTime(row.original.updated_at),
       },
     ],
-    [],
+    [favoriteMutation.isPending, toggleFavorite],
   );
 
   const handleCreate = form.handleSubmit(async (values) => {
@@ -166,6 +256,7 @@ export function ArtifactsPageClient() {
 
   const total = data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const availableTags = tagsQuery.data ?? [];
 
   return (
     <div className="space-y-6">
@@ -183,9 +274,27 @@ export function ArtifactsPageClient() {
       />
 
       <FilterBar>
+        <div className="min-w-[12rem] flex-1 space-y-1">
+          <Label htmlFor="artifact-search">Search</Label>
+          <Input
+            id="artifact-search"
+            placeholder="Search by name…"
+            value={searchInput}
+            onChange={(event) => {
+              setSearchInput(event.target.value);
+              setPageIndex(0);
+            }}
+          />
+        </div>
         <div className="w-48 space-y-1">
           <label className="text-muted-foreground text-xs">Type</label>
-          <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <Select
+            value={typeFilter}
+            onValueChange={(value) => {
+              setTypeFilter(value);
+              setPageIndex(0);
+            }}
+          >
             <SelectTrigger>
               <SelectValue placeholder="All types" />
             </SelectTrigger>
@@ -198,6 +307,52 @@ export function ArtifactsPageClient() {
               ))}
             </SelectContent>
           </Select>
+        </div>
+        <div className="w-48 space-y-1">
+          <label className="text-muted-foreground text-xs">Tag</label>
+          <Select
+            value={tagFilter}
+            onValueChange={(value) => {
+              setTagFilter(value);
+              setPageIndex(0);
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="All tags" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All tags</SelectItem>
+              {availableTags.map((tag) => (
+                <SelectItem key={tag.id} value={tag.name}>
+                  {tag.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Switch
+              id="favorites-only"
+              checked={favoritesOnly}
+              onCheckedChange={(checked) => {
+                setFavoritesOnly(checked);
+                setPageIndex(0);
+              }}
+            />
+            <Label htmlFor="favorites-only">Favorites only</Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="include-archived"
+              checked={includeArchived}
+              onCheckedChange={(checked) => {
+                setIncludeArchived(checked);
+                setPageIndex(0);
+              }}
+            />
+            <Label htmlFor="include-archived">Include archived</Label>
+          </div>
         </div>
       </FilterBar>
 

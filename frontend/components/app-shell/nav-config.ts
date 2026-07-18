@@ -13,7 +13,10 @@ import {
   ScrollText,
   Settings,
   Shield,
+  Sparkles,
   Terminal,
+  BarChart3,
+  Cpu,
 } from "lucide-react";
 
 import type { OrgRole, Permission } from "@/lib/permissions/rbac";
@@ -112,12 +115,24 @@ export const NAV_GROUPS: NavGroupConfig[] = [
         icon: Building2,
       },
       { id: "tasks", title: "Tasks", href: "/tasks", icon: ListTodo },
+      {
+        id: "usage",
+        title: "Usage",
+        href: "/usage",
+        icon: BarChart3,
+      },
     ],
   },
   {
     id: "administration",
     title: "Administration",
     items: [
+      {
+        id: "getting-started",
+        title: "Getting started",
+        href: "/onboarding",
+        icon: Sparkles,
+      },
       {
         id: "policy-packs",
         title: "Policy Packs",
@@ -132,6 +147,15 @@ export const NAV_GROUPS: NavGroupConfig[] = [
         requiresOrganization: true,
         permission: "audit.read",
         href: (ctx) => (ctx.organizationId ? `/organizations/${ctx.organizationId}/audit` : null),
+      },
+      {
+        id: "providers",
+        title: "Providers",
+        icon: Cpu,
+        requiresOrganization: true,
+        permission: "organization.update",
+        href: (ctx) =>
+          ctx.organizationId ? `/organizations/${ctx.organizationId}/providers` : null,
       },
     ],
   },
@@ -219,6 +243,9 @@ const SEGMENT_LABELS: Record<string, string> = {
   policies: "Policy Packs",
   audit: "Audit Logs",
   tasks: "Tasks",
+  usage: "Usage",
+  onboarding: "Getting started",
+  providers: "Providers",
   settings: "Settings",
   profile: "Profile",
   appearance: "Appearance",
@@ -284,6 +311,18 @@ export const COMMAND_ACTIONS = [
     label: "Artifacts",
     href: "/artifacts",
     keywords: ["files", "versions"],
+  },
+  {
+    id: "usage",
+    label: "Usage & quotas",
+    href: "/usage",
+    keywords: ["tokens", "limits", "billing"],
+  },
+  {
+    id: "onboarding",
+    label: "Getting started",
+    href: "/onboarding",
+    keywords: ["setup", "welcome", "tour"],
   },
   {
     id: "switch-org",

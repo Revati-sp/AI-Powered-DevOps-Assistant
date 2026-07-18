@@ -5,15 +5,21 @@ Production-style MVP backend that helps developers and DevOps engineers ask AI-p
 ## Features
 
 - JWT authentication with access + refresh tokens (rotation, reuse detection, logout-all)
+- Password reset, email verification, and session listing/revocation
 - Password policy validation and bcrypt rehash on login
 - Platform roles (`user`, `admin`) plus organization RBAC
+- Organization invitations (create, accept, decline, resend, revoke)
 - AI chat assistant with conversation history
 - Multi-provider LLM support: **Gemini**, **Llama**, **Mistral**
+- Provider routing policies (platform + per-org) with circuit-breaker fallbacks
+- Usage quotas (organization + optional personal defaults)
 - Streaming AI chat via Server-Sent Events (`POST /api/v1/chat/stream`)
 - Redis-backed distributed rate limiting
 - Log analysis (sync + Celery async)
 - Dockerfile, Kubernetes YAML, CI/CD pipeline, and shell command generators
 - Configuration security review (static checks + LLM enrichment)
+- Artifact tags, favorites, and archive
+- User onboarding progress tracking
 - PostgreSQL persistence, Redis, Celery workers
 - Docker Compose local stack
 - Structured API responses and centralized error handling
@@ -111,6 +117,20 @@ Key variables (see `.env.example`):
 | `CELERY_TASK_*` / `BACKGROUND_TASK_RETENTION_DAYS` | Celery limits and task retention |
 | `OTEL_*` | Optional OpenTelemetry tracing |
 | `METRICS_*` | Prometheus `/metrics` endpoint controls |
+| `EMAIL_ENABLED` | Enable outbound email (SMTP or capture in tests) |
+| `EMAIL_VERIFICATION_REQUIRED` | Block login until email is verified |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` | SMTP credentials |
+| `SMTP_FROM_EMAIL` / `SMTP_USE_TLS` | From address and TLS |
+| `PASSWORD_RESET_TOKEN_MINUTES` | Password reset link lifetime |
+| `EMAIL_VERIFICATION_TOKEN_MINUTES` | Email verification link lifetime |
+| `INVITATION_EXPIRE_HOURS` | Organization invitation lifetime |
+| `FRONTEND_BASE_URL` | Base URL for email deep links |
+| `USAGE_ENFORCE_PERSONAL_QUOTAS` | Enforce personal token limits when no org is set |
+| `USAGE_DEFAULT_DAILY_TOKEN_LIMIT` / `USAGE_DEFAULT_MONTHLY_TOKEN_LIMIT` | Personal quota defaults |
+
+### Email / SMTP
+
+Set `EMAIL_ENABLED=true` and configure `SMTP_*` for real delivery. With `EMAIL_ENABLED=false`, the app still records verification/reset/invite intent but does not send mail. When `EMAIL_VERIFICATION_REQUIRED=true`, registration automatically sends a verification email and login is rejected until the user verifies.
 
 ## Authentication and security
 
@@ -123,6 +143,13 @@ Access tokens authorize API requests. Refresh tokens rotate on each `POST /api/v
 | `POST /api/v1/auth/refresh` | Rotate refresh token |
 | `POST /api/v1/auth/logout` | Revoke one refresh token |
 | `POST /api/v1/auth/logout-all` | Revoke all sessions (requires access token) |
+| `POST /api/v1/auth/forgot-password` | Request password reset email |
+| `POST /api/v1/auth/reset-password` | Complete password reset with token |
+| `POST /api/v1/auth/change-password` | Change password (authenticated) |
+| `POST /api/v1/auth/send-verification` | Resend email verification |
+| `POST /api/v1/auth/verify-email` | Verify email with token |
+| `GET /api/v1/auth/sessions` | List active refresh sessions |
+| `DELETE /api/v1/auth/sessions/{id}` | Revoke a specific session |
 
 See [../docs/authentication.md](../docs/authentication.md) and [../docs/security.md](../docs/security.md).
 
@@ -386,6 +413,30 @@ curl -X POST http://localhost:8000/api/v1/auth/login \
   -d 'username=devops&password=securepass123'
 ```
 
+### Password reset / email verification
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/forgot-password \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"dev@example.com"}'
+
+curl -X POST http://localhost:8000/api/v1/auth/reset-password \
+  -H 'Content-Type: application/json' \
+  -d '{"token":"<reset-token>","new_password":"NewSecurePass123!"}'
+
+curl -X POST http://localhost:8000/api/v1/auth/verify-email \
+  -H 'Content-Type: application/json' \
+  -d '{"token":"<verification-token>"}'
+```
+
+### Sessions
+
+```bash
+curl http://localhost:8000/api/v1/auth/sessions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-Refresh-Token: $REFRESH_TOKEN"
+```
+
 ### Chat
 
 ```bash
@@ -440,8 +491,9 @@ curl http://localhost:8000/ready
 
 ## Future roadmap
 
-- Email invitations for organization membership
-- Advanced artifact search and tagging
+- Live LLM health probes beyond circuit-breaker snapshots
+- Shared organization-wide artifact tags (cross-user tag catalogs)
+- Richer personal quota dashboards and admin overrides
 
 ## License
 

@@ -11,5 +11,6 @@ class UserResponse(ORMModel):
     username: str
     role: UserRole
     is_active: bool
+    email_verified_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

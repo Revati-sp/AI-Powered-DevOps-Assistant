@@ -6,6 +6,7 @@ from app.api.dependencies import CurrentUser, DBSession
 from app.api.dependencies_org import PaginationParams
 from app.api.rate_limit import APIRateLimit
 from app.schemas.common import APIResponse
+from app.schemas.invitation import CreateInvitationRequest, InvitationResponse
 from app.schemas.organization import (
     AddMemberRequest,
     OrganizationCreate,
@@ -15,6 +16,7 @@ from app.schemas.organization import (
     UpdateMemberRequest,
 )
 from app.schemas.pagination import Page
+from app.services.invitation_service import InvitationService
 from app.services.organization_service import OrganizationService
 from app.utils.request_context import build_audit_context
 
@@ -172,3 +174,85 @@ async def remove_member(
         audit_context=build_audit_context(request),
     )
     return APIResponse(success=True, data={"status": "removed"})
+
+
+@router.post(
+    "/{organization_id}/invitations",
+    response_model=APIResponse[InvitationResponse],
+)
+async def create_invitation(
+    organization_id: UUID,
+    payload: CreateInvitationRequest,
+    request: Request,
+    db: DBSession,
+    current_user: CurrentUser,
+    _rl: APIRateLimit,
+) -> APIResponse[InvitationResponse]:
+    data = await InvitationService(db).create(
+        current_user,
+        organization_id,
+        payload,
+        audit_context=build_audit_context(request),
+    )
+    return APIResponse(success=True, data=data, message="Invitation sent")
+
+
+@router.get(
+    "/{organization_id}/invitations",
+    response_model=APIResponse[Page[InvitationResponse]],
+)
+async def list_invitations(
+    organization_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+    pagination: PaginationParams,
+    _rl: APIRateLimit,
+) -> APIResponse[Page[InvitationResponse]]:
+    data = await InvitationService(db).list_for_organization(
+        current_user,
+        organization_id,
+        pagination,
+    )
+    return APIResponse(success=True, data=data)
+
+
+@router.post(
+    "/{organization_id}/invitations/{invitation_id}/resend",
+    response_model=APIResponse[InvitationResponse],
+)
+async def resend_invitation(
+    organization_id: UUID,
+    invitation_id: UUID,
+    request: Request,
+    db: DBSession,
+    current_user: CurrentUser,
+    _rl: APIRateLimit,
+) -> APIResponse[InvitationResponse]:
+    data = await InvitationService(db).resend(
+        current_user,
+        organization_id,
+        invitation_id,
+        audit_context=build_audit_context(request),
+    )
+    return APIResponse(success=True, data=data, message="Invitation resent")
+
+
+@router.delete(
+    "/{organization_id}/invitations/{invitation_id}",
+    response_model=APIResponse[dict[str, str]],
+)
+async def revoke_invitation(
+    organization_id: UUID,
+    invitation_id: UUID,
+    request: Request,
+    db: DBSession,
+    current_user: CurrentUser,
+    _rl: APIRateLimit,
+) -> APIResponse[dict[str, str]]:
+    await InvitationService(db).revoke(
+        current_user,
+        organization_id,
+        invitation_id,
+        audit_context=build_audit_context(request),
+    )
+    return APIResponse(success=True, data={"status": "revoked"})

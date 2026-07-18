@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from app.models.analysis import Analysis
     from app.models.conversation import Conversation
     from app.models.generated_artifact import GeneratedArtifact
+    from app.models.user_onboarding import UserOnboarding
 
 
 class UserRole(str, enum.Enum):
@@ -41,6 +42,9 @@ class User(Base):
         nullable=False,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
@@ -59,4 +63,10 @@ class User(Base):
     )
     artifacts: Mapped[list[GeneratedArtifact]] = relationship(
         "GeneratedArtifact", back_populates="user", cascade="all, delete-orphan"
+    )
+    onboarding: Mapped[UserOnboarding | None] = relationship(
+        "UserOnboarding",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False,
     )
