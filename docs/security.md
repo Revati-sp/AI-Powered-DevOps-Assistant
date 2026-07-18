@@ -44,6 +44,19 @@ Redis-backed sliding-window limits by route category (auth, API, LLM, stream, up
 - Optional host allowlist via `ALLOWED_LLM_HOSTS`.
 - URLs with embedded credentials are rejected.
 
+## Configuration review
+
+`POST /api/v1/review` supports:
+
+`dockerfile`, `kubernetes`, `terraform`, `github-actions`, `gitlab-ci`, `jenkins`
+
+- Deterministic (static) findings are authoritative and are not removed by LLM enrichment.
+- Organization policy findings remain separate (`organization_policy` source).
+- LLM findings are supplemental only.
+- Reviews are preview-only: nothing is executed, applied, or deployed.
+- GitLab CI checks do not fetch remote `include:` sources; unpinned remotes are flagged heuristically.
+- Jenkins checks use safe text/pattern matching and do not execute Groovy.
+
 ## Audit and redaction
 
 Security-sensitive actions emit audit events. Metadata is recursively redacted before persistence (`audit_redaction` utilities).

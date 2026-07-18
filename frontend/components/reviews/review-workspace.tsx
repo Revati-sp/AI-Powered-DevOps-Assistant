@@ -34,7 +34,14 @@ import {
 } from "@/components/ui/select";
 import { useReviewConfiguration } from "@/features/reviews/hooks";
 import { reviewFormSchema, type ReviewFormValues } from "@/features/reviews/schemas";
-import type { ReviewFinding, ReviewResponse, ReviewType } from "@/features/reviews/types";
+import {
+  REVIEW_TYPE_HINTS,
+  REVIEW_TYPE_LABELS,
+  REVIEW_TYPE_SAMPLES,
+  type ReviewFinding,
+  type ReviewResponse,
+  type ReviewType,
+} from "@/features/reviews/types";
 import { apiFetch } from "@/lib/api/client";
 import { endpoints } from "@/lib/api/endpoints";
 import type { components } from "@/lib/api/generated-types";
@@ -45,12 +52,9 @@ import { useWorkspaceStore } from "@/store/workspace-store";
 
 type PolicyPacksPage = components["schemas"]["Page_PolicyPackResponse_"];
 
-const REVIEW_TYPES: Array<{ value: ReviewType; label: string }> = [
-  { value: "dockerfile", label: "Dockerfile" },
-  { value: "kubernetes", label: "Kubernetes" },
-  { value: "terraform", label: "Terraform" },
-  { value: "github-actions", label: "GitHub Actions" },
-];
+const REVIEW_TYPES: Array<{ value: ReviewType; label: string }> = (
+  Object.keys(REVIEW_TYPE_LABELS) as ReviewType[]
+).map((value) => ({ value, label: REVIEW_TYPE_LABELS[value] }));
 
 function editorLanguageFor(type: ReviewType): EditorLanguage {
   switch (type) {
@@ -58,7 +62,10 @@ function editorLanguageFor(type: ReviewType): EditorLanguage {
       return "dockerfile";
     case "kubernetes":
     case "github-actions":
+    case "gitlab-ci":
       return "yaml";
+    case "jenkins":
+      return "groovy";
     case "terraform":
       return "hcl";
     default:
@@ -188,7 +195,24 @@ export function ReviewWorkspace() {
               name="content"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Content</FormLabel>
+                  <FormLabel>
+                    {reviewType === "gitlab-ci"
+                      ? "GitLab CI content"
+                      : reviewType === "jenkins"
+                        ? "Jenkinsfile content"
+                        : "Content"}
+                  </FormLabel>
+                  <FormDescription>{REVIEW_TYPE_HINTS[reviewType]}</FormDescription>
+                  <div className="flex flex-wrap gap-2 pb-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => form.setValue("content", REVIEW_TYPE_SAMPLES[reviewType])}
+                    >
+                      Load sample
+                    </Button>
+                  </div>
                   <FormControl>
                     <CodeEditor
                       value={field.value}
@@ -304,8 +328,14 @@ export function ReviewWorkspace() {
           {!result ? (
             <div className="rounded-md border">
               <EmptyState
-                title="Ready for review"
-                description="Submit a configuration to receive findings, severity ratings, and remediation guidance."
+                title={`Ready for ${REVIEW_TYPE_LABELS[reviewType]} review`}
+                description={
+                  reviewType === "gitlab-ci"
+                    ? "Paste .gitlab-ci.yml to run deterministic checks for secrets, privileged jobs, images, and deploy guards."
+                    : reviewType === "jenkins"
+                      ? "Paste a Jenkinsfile to review credentials, shell risk, Docker usage, and approval gaps."
+                      : "Submit a configuration to receive findings, severity ratings, and remediation guidance."
+                }
               />
             </div>
           ) : (
@@ -313,8 +343,9 @@ export function ReviewWorkspace() {
               <div className="space-y-3 rounded-md border p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="secondary">Score: {result.score}</Badge>
+                  <Badge variant="outline">{REVIEW_TYPE_LABELS[reviewType]}</Badge>
                   <span className="text-muted-foreground text-xs">
-                    AI-generated output — review before use.
+                    Preview-only review — nothing was executed or applied.
                   </span>
                 </div>
                 <p className="text-sm">{result.summary}</p>

@@ -3,9 +3,18 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+ReviewConfigType = Literal[
+    "dockerfile",
+    "kubernetes",
+    "terraform",
+    "github-actions",
+    "gitlab-ci",
+    "jenkins",
+]
+
 
 class ReviewRequest(BaseModel):
-    type: Literal["dockerfile", "kubernetes", "terraform", "github-actions"]
+    type: ReviewConfigType
     content: str = Field(min_length=1, max_length=500_000)
     provider: str = "gemini"
     organization_id: UUID | None = None

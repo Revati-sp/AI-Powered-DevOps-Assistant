@@ -20,7 +20,7 @@ The `code` field uses stable values from `app/core/error_codes.py`. Clients shou
 | Code | Typical HTTP | Source |
 |---|---|---|
 | `APP_ERROR` | 400 | Generic `AppError` default |
-| `VALIDATION_ERROR` | 422 | Pydantic / request validation failures |
+| `VALIDATION_ERROR` | 422 | Pydantic / request validation failures (including unknown review `type` values) |
 | `INVALID_CREDENTIALS` | 401 | Failed login or refresh (generic message) |
 | `UNAUTHORIZED` | 401 | Missing or invalid access token |
 | `FORBIDDEN` | 403 | Authenticated but not permitted (RBAC) |

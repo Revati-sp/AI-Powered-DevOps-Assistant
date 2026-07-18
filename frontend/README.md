@@ -104,6 +104,10 @@ Chat streaming uses the BFF path against `/api/v1/chat/stream`. The client parse
 - Dashboard widgets use `GET /api/v1/dashboard/{summary,activity,findings,tasks}` for the selected organization and time range. Summary request usage (`requests_used` / `requests_limit`) appears as a progress indicator; a failed widget does not prevent the remaining dashboard data from rendering.
 - Profile settings update `username`, `display_name`, `timezone`, `job_title`, and `avatar_url` through `PATCH /api/v1/users/me` via the BFF. Security settings request email changes with `{ new_email, password }`; confirmation is an unauthenticated token link proxied by `/api/auth/confirm-email-change`.
 
+## Log analyzer workspace scope
+
+The log analyzer paste form defaults to **Personal workspace**. When the header organization switcher has an org selected and the user has `resource.create`, they can choose that organization for async analysis. The UI sends `organization_id` only for organization-scoped async submissions; viewers cannot submit org-scoped analyses.
+
 ## Generators hub
 
 `/generators` links to Dockerfile, Kubernetes, CI/CD pipeline, and shell command generators. Each form posts through the BFF; output is editable and can be saved as an artifact when the API allows.
@@ -156,6 +160,7 @@ docker run --rm -p 3000:3000 \
 - BFF trusts network reachability to `INTERNAL_API_BASE_URL`; keep that URL private in deployments.
 - Client-side RBAC is cosmetic; always enforce on the API.
 - Generated infra/commands are preview-only; the UI does not execute them.
+- Configuration Review supports Dockerfile, Kubernetes, Terraform, GitHub Actions, GitLab CI (YAML), and Jenkins (Groovy); findings are advisory only.
 - XSS: markdown is sanitized (`rehype-sanitize`); still treat model output as untrusted.
 - No frontend LLM keys; do not add provider secrets to `NEXT_PUBLIC_*`.
 - E2E mocks are not a security boundary — they only isolate CI from a live API.

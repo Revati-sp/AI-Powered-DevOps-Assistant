@@ -101,6 +101,7 @@ def evaluate_rule(
             )
 
     elif key == "forbid_latest_image_tag":
+        # Applies whenever content matches (dockerfile/k8s/CI/general packs).
         match = LATEST_TAG_RE.search(content)
         if match:
             findings.append(

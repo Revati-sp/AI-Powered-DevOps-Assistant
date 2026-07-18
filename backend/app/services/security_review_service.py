@@ -16,6 +16,7 @@ from app.services.llm.gateway import LLMGateway
 from app.services.llm.prompts import REVIEW_SYSTEM_PROMPT
 from app.services.policy_service import PolicyService
 from app.services.rbac import OrganizationAuthService, Permission
+from app.services.review_checks import check_gitlab_ci, check_jenkins
 from app.utils.sanitization import preview_text, sanitize_text
 
 SECRET_RE = re.compile(
@@ -29,6 +30,11 @@ def _line_of(content: str, match_start: int) -> int:
 
 
 def run_static_checks(config_type: str, content: str) -> list[ReviewFinding]:
+    if config_type == "gitlab-ci":
+        return check_gitlab_ci(content)
+    if config_type == "jenkins":
+        return check_jenkins(content)
+
     findings: list[ReviewFinding] = []
     lines = content.splitlines()
 
@@ -252,6 +258,10 @@ class SecurityReviewService:
             gateway = LLMGateway(self.session)
             prompt = (
                 f"Config type: {payload.type}\n"
+                "Deterministic (static and organization-policy) findings are authoritative; "
+                "do not remove, contradict, or downgrade them. "
+                "Only suggest supplemental findings.\n"
+                "Do not execute, apply, or test this configuration.\n"
                 f"Static findings: {json.dumps([f.model_dump() for f in deterministic_findings])}\n\n"
                 f"CONTENT:\n{content[:100_000]}"
             )

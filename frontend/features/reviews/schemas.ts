@@ -2,7 +2,14 @@ import { z } from "zod";
 
 import { LLM_PROVIDERS } from "@/lib/constants/app";
 
-export const reviewTypeSchema = z.enum(["dockerfile", "kubernetes", "terraform", "github-actions"]);
+export const reviewTypeSchema = z.enum([
+  "dockerfile",
+  "kubernetes",
+  "terraform",
+  "github-actions",
+  "gitlab-ci",
+  "jenkins",
+]);
 
 export const reviewFormSchema = z.object({
   type: reviewTypeSchema,
