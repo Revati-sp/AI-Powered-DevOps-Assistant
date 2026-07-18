@@ -1356,6 +1356,11 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id?: string | null;
             /** Messages */
             messages?: components["schemas"]["MessageResponse"][];
         };
@@ -1380,6 +1385,11 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id?: string | null;
         };
         /** DockerfileRequest */
         DockerfileRequest: {
@@ -2305,6 +2315,14 @@ export interface components {
             email: string;
             /** Username */
             username: string;
+            /** Display Name */
+            display_name?: string | null;
+            /** Timezone */
+            timezone?: string | null;
+            /** Job Title */
+            job_title?: string | null;
+            /** Avatar Url */
+            avatar_url?: string | null;
             role: components["schemas"]["UserRole"];
             /** Is Active */
             is_active: boolean;

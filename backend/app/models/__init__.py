@@ -8,6 +8,7 @@ from app.models.artifact_version import ArtifactVersion
 from app.models.audit import AuditEvent
 from app.models.background_task import BackgroundTask, TaskStatus
 from app.models.conversation import Conversation
+from app.models.email_change_token import EmailChangeToken
 from app.models.email_verification_token import EmailVerificationToken
 from app.models.generated_artifact import ArtifactType, GeneratedArtifact
 from app.models.message import Message, MessageRole
@@ -37,6 +38,7 @@ __all__ = [
     "AuditEvent",
     "BackgroundTask",
     "Conversation",
+    "EmailChangeToken",
     "EmailVerificationToken",
     "GeneratedArtifact",
     "InvitationStatus",

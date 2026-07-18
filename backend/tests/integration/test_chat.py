@@ -3,6 +3,41 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
+async def test_conversation_list_filters_sort_and_pagination(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    for message in ["Alpha deployment", "Beta rollout"]:
+        response = await client.post(
+            "/api/v1/chat",
+            headers=auth_headers,
+            json={"message": message, "provider": "gemini"},
+        )
+        assert response.status_code == 200, response.text
+
+    filtered = await client.get(
+        "/api/v1/chat/conversations",
+        headers=auth_headers,
+        params={"search": "Alpha", "sort_by": "title", "sort_order": "asc"},
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert [item["title"] for item in filtered.json()["data"]["items"]] == [
+        "Alpha deployment"
+    ]
+    assert filtered.json()["data"]["items"][0]["organization_id"] is None
+
+    provider_filtered = await client.get(
+        "/api/v1/chat/conversations",
+        headers=auth_headers,
+        params={"provider": "gemini", "limit": 1, "offset": 0},
+    )
+    assert provider_filtered.status_code == 200
+    page = provider_filtered.json()["data"]
+    assert page["total"] == 2
+    assert page["limit"] == 1
+    assert page["items"][0]["provider"] == "gemini"
+
+
+@pytest.mark.asyncio
 async def test_chat_and_conversation_ownership(
     client: AsyncClient, auth_headers: dict[str, str]
 ) -> None:

@@ -8,6 +8,7 @@ export interface ErrorStateProps extends React.HTMLAttributes<HTMLDivElement> {
   title?: string;
   message: string;
   requestId?: string;
+  retryAfterSeconds?: number;
   onRetry?: () => void;
 }
 
@@ -15,6 +16,7 @@ function ErrorState({
   title = "Something went wrong",
   message,
   requestId,
+  retryAfterSeconds,
   onRetry,
   className,
   ...props
@@ -34,6 +36,11 @@ function ErrorState({
         <p className="text-muted-foreground max-w-md text-sm">{message}</p>
         {requestId ? (
           <p className="text-muted-foreground font-mono text-xs">Request ID: {requestId}</p>
+        ) : null}
+        {retryAfterSeconds !== undefined ? (
+          <p className="text-muted-foreground text-xs">
+            Try again in {retryAfterSeconds} second{retryAfterSeconds === 1 ? "" : "s"}.
+          </p>
         ) : null}
       </div>
       {onRetry ? (

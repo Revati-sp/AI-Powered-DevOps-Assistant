@@ -295,6 +295,7 @@ class SecurityReviewService:
             input_preview=preview_text(content),
             status=AnalysisStatus.COMPLETED,
             result_json=result.model_dump(mode="json"),
+            organization_id=payload.organization_id,
         )
         await self.audit.record_event(
             action="review.completed",

@@ -25,7 +25,7 @@ The `code` field uses stable values from `app/core/error_codes.py`. Clients shou
 | `UNAUTHORIZED` | 401 | Missing or invalid access token |
 | `FORBIDDEN` | 403 | Authenticated but not permitted (RBAC) |
 | `NOT_FOUND` | 404 | Missing resource or non-leaking org probe |
-| `CONFLICT` | 409 | Duplicate registration, slug conflict, etc. |
+| `CONFLICT` | 409 | Duplicate registration, username conflict, slug conflict, etc. |
 | `LLM_ERROR` | 502 | Provider timeout or upstream failure |
 | `RATE_LIMIT_EXCEEDED` | 429 | Redis rate limiter |
 | `INTERNAL_ERROR` | 500 | Unhandled exception |

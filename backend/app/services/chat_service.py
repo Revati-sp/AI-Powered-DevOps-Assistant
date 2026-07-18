@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -309,9 +310,27 @@ class ChatService:
         *,
         limit: int,
         offset: int,
+        search: str | None = None,
+        provider: str | None = None,
+        organization_id: UUID | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        sort_by: str = "updated_at",
+        sort_order: str = "desc",
     ) -> Page[ConversationSummary]:
+        if organization_id is not None:
+            await self.org_auth.require_membership(organization_id, user.id)
         rows, total = await self.conversations.list_for_user(
-            user.id, limit=limit, offset=offset
+            user.id,
+            limit=limit,
+            offset=offset,
+            search=search,
+            provider=provider,
+            organization_id=organization_id,
+            created_from=created_from,
+            created_to=created_to,
+            sort_by=sort_by,
+            sort_order=sort_order,
         )
         return Page(
             items=[ConversationSummary.model_validate(row) for row in rows],

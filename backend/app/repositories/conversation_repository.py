@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -45,13 +46,38 @@ class ConversationRepository:
         return result.scalar_one_or_none()
 
     async def list_for_user(
-        self, user_id: UUID, *, limit: int, offset: int
+        self,
+        user_id: UUID,
+        *,
+        limit: int,
+        offset: int,
+        search: str | None = None,
+        provider: str | None = None,
+        organization_id: UUID | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        sort_by: str = "updated_at",
+        sort_order: str = "desc",
     ) -> tuple[list[Conversation], int]:
-        base = (
-            select(Conversation)
-            .where(Conversation.user_id == user_id)
-            .order_by(Conversation.updated_at.desc())
+        base = select(Conversation).where(Conversation.user_id == user_id)
+        if organization_id is not None:
+            base = base.where(Conversation.organization_id == organization_id)
+        else:
+            base = base.where(Conversation.organization_id.is_(None))
+        if search:
+            base = base.where(Conversation.title.ilike(f"%{search.strip()}%"))
+        if provider:
+            base = base.where(Conversation.provider == provider)
+        if created_from:
+            base = base.where(Conversation.created_at >= created_from)
+        if created_to:
+            base = base.where(Conversation.created_at <= created_to)
+        sort_column = getattr(Conversation, sort_by)
+        ordering = sort_column.asc() if sort_order == "asc" else sort_column.desc()
+        id_ordering = (
+            Conversation.id.asc() if sort_order == "asc" else Conversation.id.desc()
         )
+        base = base.order_by(ordering, id_ordering)
         count_result = await self.session.execute(
             select(func.count()).select_from(base.subquery())
         )

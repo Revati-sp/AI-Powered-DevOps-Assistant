@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Request
 
 from app.api.dependencies import CurrentUser, DBSession
 from app.api.rate_limit import APIRateLimit
 from app.models.background_task import TaskStatus
 from app.schemas.common import APIResponse
-from app.schemas.pagination import Page
+from app.schemas.pagination import Page, PageParams
 from app.schemas.tasks import (
     TaskCancelResponse,
     TaskDetailResponse,
@@ -28,20 +28,24 @@ async def list_tasks(
     status: TaskStatus | None = None,
     task_type: str | None = None,
     organization_id: UUID | None = None,
-    limit: int = Query(default=20, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    pagination: PageParams = Depends(),
 ) -> APIResponse[Page[TaskSummaryResponse]]:
     items, total = await TaskService(db).list_tasks(
         current_user,
         organization_id=organization_id,
         status=status,
         task_type=task_type,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
     )
     return APIResponse(
         success=True,
-        data=Page(items=items, total=total, limit=limit, offset=offset),
+        data=Page(
+            items=items,
+            total=total,
+            limit=pagination.limit,
+            offset=pagination.offset,
+        ),
     )
 
 

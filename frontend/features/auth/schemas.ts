@@ -67,3 +67,10 @@ export const changePasswordSchema = z
   });
 
 export type ChangePasswordFormValues = z.infer<typeof changePasswordSchema>;
+
+export const emailChangeRequestSchema = z.object({
+  new_email: z.string().trim().min(1, "Email is required").email("Enter a valid email address"),
+  password: z.string().min(1, "Current password is required"),
+});
+
+export type EmailChangeRequestFormValues = z.infer<typeof emailChangeRequestSchema>;

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
 
 from app.api.dependencies import CurrentUser, DBSession
+from app.models.generated_artifact import ArtifactType
 from app.schemas.artifact_tags import (
     ArtifactTagAssignRequest,
     ArtifactTagCreateRequest,
@@ -22,11 +24,17 @@ from app.schemas.artifacts import (
     ArtifactVersionResponse,
 )
 from app.schemas.common import APIResponse
-from app.schemas.pagination import Page, PageParams
+from app.schemas.pagination import Page, PageParams, SortParams, create_sort_params
 from app.services.artifact_service import ArtifactService
 from app.utils.request_context import build_audit_context
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
+_ArtifactSortParams = create_sort_params(
+    frozenset(
+        {"created_at", "updated_at", "name", "artifact_type", "current_version_number"}
+    ),
+    default_field="updated_at",
+)
 
 
 @router.post("", response_model=APIResponse[ArtifactDetailResponse])
@@ -46,13 +54,20 @@ async def create_artifact(
 async def list_artifacts(
     db: DBSession,
     current_user: CurrentUser,
-    pagination: PageParams = Depends(),
+    pagination: Annotated[PageParams, Depends()],
+    sorting: Annotated[SortParams, Depends(_ArtifactSortParams)],
     organization_id: UUID | None = None,
     search: str | None = Query(default=None, max_length=255),
     tags: list[str] | None = Query(default=None),
     favorites_only: bool = False,
     include_archived: bool = False,
+    archived_only: bool = False,
     creator_id: UUID | None = None,
+    artifact_type: ArtifactType | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    updated_from: datetime | None = None,
+    updated_to: datetime | None = None,
 ) -> APIResponse[Page[ArtifactSummaryResponse]]:
     items, total = await ArtifactService(db).list_artifacts(
         current_user,
@@ -63,7 +78,15 @@ async def list_artifacts(
         tags=tags,
         favorites_only=favorites_only,
         include_archived=include_archived,
+        archived_only=archived_only,
         creator_id=creator_id,
+        artifact_type=artifact_type,
+        created_from=created_from,
+        created_to=created_to,
+        updated_from=updated_from,
+        updated_to=updated_to,
+        sort_by=sorting.sort_by,
+        sort_order=sorting.sort_order,
     )
     return APIResponse(
         success=True,

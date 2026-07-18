@@ -1,6 +1,8 @@
+from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import CurrentUser, DBSession
@@ -12,10 +14,13 @@ from app.schemas.chat import (
     ConversationSummary,
 )
 from app.schemas.common import APIResponse
-from app.schemas.pagination import Page
+from app.schemas.pagination import Page, PageParams, SortParams, create_sort_params
 from app.services.chat_service import ChatService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+_ConversationSortParams = create_sort_params(
+    frozenset({"created_at", "updated_at", "title"}), default_field="updated_at"
+)
 
 
 @router.post("", response_model=APIResponse[ChatResponse])
@@ -65,13 +70,25 @@ async def list_conversations(
     db: DBSession,
     current_user: CurrentUser,
     _rl: APIRateLimit,
-    limit: int = Query(default=20, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    pagination: Annotated[PageParams, Depends()],
+    sorting: Annotated[SortParams, Depends(_ConversationSortParams)],
+    search: str | None = Query(default=None, max_length=255),
+    provider: str | None = Query(default=None, max_length=50),
+    organization_id: UUID | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
 ) -> APIResponse[Page[ConversationSummary]]:
     data = await ChatService(db).list_conversations(
         current_user,
-        limit=limit,
-        offset=offset,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        search=search,
+        provider=provider,
+        organization_id=organization_id,
+        created_from=created_from,
+        created_to=created_to,
+        sort_by=sorting.sort_by,
+        sort_order=sorting.sort_order,
     )
     return APIResponse(success=True, data=data)
 

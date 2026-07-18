@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -210,7 +211,15 @@ class ArtifactService:
         tags: list[str] | None = None,
         favorites_only: bool = False,
         include_archived: bool = False,
+        archived_only: bool = False,
         creator_id: UUID | None = None,
+        artifact_type: ArtifactType | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+        updated_from: datetime | None = None,
+        updated_to: datetime | None = None,
+        sort_by: str = "updated_at",
+        sort_order: str = "desc",
     ) -> tuple[list[ArtifactSummaryResponse], int]:
         if organization_id is not None:
             await self.org_auth.require_permission(
@@ -223,7 +232,15 @@ class ArtifactService:
                 favorites_only=favorites_only,
                 favorites_user_id=user.id if favorites_only else None,
                 include_archived=include_archived,
+                archived_only=archived_only,
                 creator_id=creator_id,
+                artifact_type=artifact_type,
+                created_from=created_from,
+                created_to=created_to,
+                updated_from=updated_from,
+                updated_to=updated_to,
+                sort_by=sort_by,
+                sort_order=sort_order,
                 limit=limit,
                 offset=offset,
             )
@@ -235,34 +252,44 @@ class ArtifactService:
                 favorites_only=favorites_only,
                 favorites_user_id=user.id if favorites_only else None,
                 include_archived=include_archived,
+                archived_only=archived_only,
                 creator_id=creator_id,
+                artifact_type=artifact_type,
+                created_from=created_from,
+                created_to=created_to,
+                updated_from=updated_from,
+                updated_to=updated_to,
+                sort_by=sort_by,
+                sort_order=sort_order,
                 limit=limit,
                 offset=offset,
             )
 
-        summaries: list[ArtifactSummaryResponse] = []
-        for artifact in items:
-            version_number = None
-            if artifact.current_version_id:
-                from app.models.artifact_version import ArtifactVersion
-
-                version = await self.session.get(
-                    ArtifactVersion, artifact.current_version_id
-                )
-                if version:
-                    version_number = version.version_number
-            tag_rows = await self.tags.list_tags_for_artifact(artifact.id)
-            is_favorited = await self.tags.is_favorited(
-                user_id=user.id, artifact_id=artifact.id
+        artifact_ids = [artifact.id for artifact in items]
+        tags_by_artifact = await self.tags.list_tags_for_artifacts(artifact_ids)
+        favorited_ids = await self.tags.list_favorited_artifact_ids(
+            user_id=user.id, artifact_ids=artifact_ids
+        )
+        version_numbers = {
+            artifact.id: next(
+                (
+                    version.version_number
+                    for version in artifact.versions
+                    if version.id == artifact.current_version_id
+                ),
+                None,
             )
-            summaries.append(
-                self._to_summary(
-                    artifact,
-                    version_number=version_number,
-                    is_favorited=is_favorited,
-                    tag_names=[tag.name for tag in tag_rows],
-                )
+            for artifact in items
+        }
+        summaries = [
+            self._to_summary(
+                artifact,
+                version_number=version_numbers[artifact.id],
+                is_favorited=artifact.id in favorited_ids,
+                tag_names=tags_by_artifact[artifact.id],
             )
+            for artifact in items
+        ]
         return summaries, total
 
     async def get_artifact(

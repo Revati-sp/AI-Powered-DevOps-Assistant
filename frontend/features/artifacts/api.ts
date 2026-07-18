@@ -26,6 +26,14 @@ export type ListArtifactsParams = {
   tags?: string[];
   favorites_only?: boolean;
   include_archived?: boolean;
+  archived_only?: boolean;
+  artifact_type?: string;
+  created_from?: string;
+  created_to?: string;
+  updated_from?: string;
+  updated_to?: string;
+  sort_by?: string;
+  sort_order?: "asc" | "desc";
 };
 
 export function listArtifacts(params: ListArtifactsParams = {}): Promise<ArtifactsPage> {
@@ -37,6 +45,14 @@ export function listArtifacts(params: ListArtifactsParams = {}): Promise<Artifac
     tags: params.tags?.length ? params.tags : undefined,
     favorites_only: params.favorites_only ? true : undefined,
     include_archived: params.include_archived ? true : undefined,
+    archived_only: params.archived_only ? true : undefined,
+    artifact_type: params.artifact_type,
+    created_from: params.created_from,
+    created_to: params.created_to,
+    updated_from: params.updated_from,
+    updated_to: params.updated_to,
+    sort_by: params.sort_by,
+    sort_order: params.sort_order,
   });
   return apiFetch<ArtifactsPage>(`${endpoints.artifacts.list()}${qs}`);
 }

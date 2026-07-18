@@ -17,6 +17,7 @@ from app.api.routes import (
     artifacts,
     auth,
     chat,
+    dashboard,
     generators,
     health,
     invitations,
@@ -239,6 +240,7 @@ app.include_router(health.router)
 app.include_router(auth.router, prefix=api_prefix)
 app.include_router(users.router, prefix=api_prefix)
 app.include_router(chat.router, prefix=api_prefix)
+app.include_router(dashboard.router, prefix=api_prefix)
 app.include_router(logs.router, prefix=api_prefix)
 app.include_router(tasks.router, prefix=api_prefix)
 app.include_router(generators.router, prefix=api_prefix)

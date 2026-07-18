@@ -57,6 +57,26 @@ class UserRepository:
         await self.session.refresh(user)
         return user
 
+    async def update_profile(self, user_id: UUID, **fields: str | None) -> User | None:
+        user = await self.get_by_id(user_id)
+        if user is None:
+            return None
+        for key, value in fields.items():
+            setattr(user, key, value)
+        await self.session.flush()
+        await self.session.refresh(user)
+        return user
+
+    async def update_email(self, user_id: UUID, email: str) -> User | None:
+        user = await self.get_by_id(user_id)
+        if user is None:
+            return None
+        user.email = email.lower()
+        user.email_verified_at = datetime.now(UTC)
+        await self.session.flush()
+        await self.session.refresh(user)
+        return user
+
     async def mark_email_verified(self, user_id: UUID) -> User | None:
         user = await self.get_by_id(user_id)
         if user is None:

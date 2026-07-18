@@ -53,8 +53,11 @@ Integration tests use in-memory SQLite and mock LLM providers. Rate limiting is 
 ## Project conventions
 
 - Routes return `APIResponse[T]` envelopes (except OAuth2 login/refresh token responses).
-- Paginated lists use `Page` with `items`, `total`, `limit`, `offset`.
+- Paginated lists use `Page` with `items`, `total`, `limit`, `offset` (default limit 20, max 100).
+- Sort allowlists use `create_sort_params` / `SortParams`; never accept arbitrary column names.
 - Organization permission checks belong in services, not routes.
+- Profile email changes are a separate token flow from `PATCH /users/me`.
+- Dashboard aggregates live under `/api/v1/dashboard/*` and must not load full chat/artifact payloads.
 - Never log secrets, Authorization headers, or full uploaded log content.
 
 ## Frontend

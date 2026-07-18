@@ -5,6 +5,7 @@ from pathlib import Path
 
 from app.core.database import Base
 from app.models import (
+    EmailChangeToken,
     EmailVerificationToken,
     Organization,
     OrganizationInvitation,
@@ -35,7 +36,7 @@ def test_alembic_has_single_head() -> None:
         if line.strip() and "(head)" in line
     ]
     assert len(heads) == 1
-    assert "010_pipeline_shell_routing" in heads[0]
+    assert "011_user_profile" in heads[0]
 
 
 def test_refresh_token_and_organization_models_in_metadata() -> None:
@@ -44,6 +45,7 @@ def test_refresh_token_and_organization_models_in_metadata() -> None:
     assert Organization.__tablename__ in table_names
     assert PasswordResetToken.__tablename__ in table_names
     assert EmailVerificationToken.__tablename__ in table_names
+    assert EmailChangeToken.__tablename__ in table_names
     assert OrganizationInvitation.__tablename__ in table_names
     assert ProviderConfig.__tablename__ in table_names
     assert UsageEvent.__tablename__ in table_names
@@ -60,6 +62,7 @@ def test_sqlite_create_all_matches_model_metadata() -> None:
     assert Organization.__tablename__ in created_tables
     assert PasswordResetToken.__tablename__ in created_tables
     assert EmailVerificationToken.__tablename__ in created_tables
+    assert EmailChangeToken.__tablename__ in created_tables
     assert OrganizationInvitation.__tablename__ in created_tables
     assert ProviderConfig.__tablename__ in created_tables
     assert UsageEvent.__tablename__ in created_tables

@@ -25,15 +25,18 @@ Inspected: `backend/app` routes, schemas, RBAC, SSE, rate limits, and runtime Op
 
 No `artifact.delete`, `task.read`, `conversation.create`, or `analysis.create` enums — map UX to closest permission (`artifact.write`, membership, `resource.create`).
 
-## Documented gaps (no backend change)
+## Profile, dashboard, and lists
 
-1. Profile is read-only (`GET /users/me` only).
-2. Conversation list is unpaginated; DTOs omit `organization_id`.
-3. Async log analysis cannot attach `organization_id` via public API.
-4. Review `type` omits `gitlab-ci` / `jenkins` (policy resource types include them).
-5. No dedicated dashboard aggregate endpoints — derive from bounded list calls.
-6. Artifact list has no type/date/creator query filters — filter client-side within page or omit.
-7. Sort query helpers exist in schemas but are unused by routes.
+1. Profile supports `PATCH /api/v1/users/me` with `username`, `display_name`, `timezone`, `job_title`, and HTTPS `avatar_url`. Email changes use authenticated `POST /api/v1/users/me/email-change/request` with `{ new_email, password }`, followed by unauthenticated `POST /api/v1/users/me/email-change/confirm` with `{ token }`.
+2. Dashboard summary, activity, findings, and task aggregates are `GET /api/v1/dashboard/{summary,activity,findings,tasks}` and accept `organization_id` and `time_range` (`24h`, `7d`, `30d`). Summary includes `usage.requests_used` and `usage.requests_limit`.
+3. Conversation list is paginated and accepts server-side `search`, `provider`, `organization_id`, `created_from`, `created_to`, `sort_by`, `sort_order`, `limit`, and `offset` filters. Responses use `{ items, total, limit, offset }`; conversation summaries include `organization_id`.
+4. Artifact list accepts `search`, `tags`, `favorites_only`, `include_archived`, `archived_only`, `artifact_type`, date, sort, `limit`, and `offset` filters. Responses use `{ items, total, limit, offset }`; artifact URLs synchronize `page`, `search`, `artifact_type`, `tag`, `favorites_only`, `include_archived`, `sort_by`, and `sort_order`.
+5. The dashboard UI tolerates individual widget failures via `Promise.allSettled`.
+
+## Remaining gaps
+
+1. Async log analysis cannot attach `organization_id` via public API.
+2. Review `type` omits `gitlab-ci` / `jenkins` (policy resource types include them).
 
 ## Providers
 

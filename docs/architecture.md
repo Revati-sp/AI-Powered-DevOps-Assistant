@@ -26,10 +26,12 @@ Client → Middleware (request ID, size limits, security headers, CORS)
 ## Major subsystems
 
 - **Authentication** — JWT access tokens plus server-side refresh token rotation (`AuthService`, `RefreshTokenRepository`).
+- **User profiles** — Editable profile fields via `PATCH /users/me`; email changes use a separate request/confirm token flow (`ProfileService`).
 - **Organizations & RBAC** — Multi-tenant workspaces with role-based permissions (`OrganizationAuthService`).
-- **Chat** — Sync and SSE streaming chat with conversation history (`ChatService`, LLM provider factory).
+- **Dashboard** — Aggregate summary, activity, findings, and task endpoints scoped by personal/org context and time range (`DashboardService`).
+- **Chat** — Sync and SSE streaming chat with conversation history (`ChatService`, LLM provider factory); conversation lists support search, filters, sorting, and pagination.
 - **Generators & reviews** — Dockerfile, Kubernetes, CI, shell command generation; static + policy + LLM security review.
-- **Artifacts** — Versioned generated content with diff and restore.
+- **Artifacts** — Versioned generated content with diff and restore; list APIs support search, tags, favorites, archive, type, dates, and sorting.
 - **Policy engine** — Organization policy packs evaluated deterministically.
 - **Audit** — Append-only security event log with metadata redaction.
 - **Background tasks** — Persistent task records backed by Celery for async log analysis and similar work.
@@ -51,6 +53,8 @@ Errors use:
 ```
 
 Paginated list endpoints return `data` as a `Page` object: `{items, total, limit, offset}`.
+
+Default page size is 20 (maximum 100). Sort fields are allowlisted per resource via `create_sort_params` (for example conversations: `created_at`, `updated_at`, `title`; artifacts: `created_at`, `updated_at`, `name`, `artifact_type`, `current_version_number`). Stable secondary ordering uses the primary key.
 
 ## Infrastructure boundary
 

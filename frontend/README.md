@@ -97,6 +97,13 @@ Chat streaming uses the BFF path against `/api/v1/chat/stream`. The client parse
 - Nav and actions use `useOrgRole()` for UX gating only.
 - Backend RBAC remains authoritative. Permission keys and gaps are documented in `docs/BACKEND_CONTRACT.md` and root `docs/rbac.md`.
 
+## List URLs and dashboard data
+
+- Artifact filters and pagination are shareable URLs. The page synchronizes `page`, `search`, `artifact_type`, `tag`, `favorites_only`, `include_archived`, `sort_by`, and `sort_order` with `router.replace`, so browser back/forward restores the list state.
+- Artifact and conversation list responses use the pagination envelope `{ items, total, limit, offset }`. Conversation filters include `search`, `provider`, organization, date, and sort fields; artifact filters include search, tags, favorites/archive state, type, date, and sort fields.
+- Dashboard widgets use `GET /api/v1/dashboard/{summary,activity,findings,tasks}` for the selected organization and time range. Summary request usage (`requests_used` / `requests_limit`) appears as a progress indicator; a failed widget does not prevent the remaining dashboard data from rendering.
+- Profile settings update `username`, `display_name`, `timezone`, `job_title`, and `avatar_url` through `PATCH /api/v1/users/me` via the BFF. Security settings request email changes with `{ new_email, password }`; confirmation is an unauthenticated token link proxied by `/api/auth/confirm-email-change`.
+
 ## Generators hub
 
 `/generators` links to Dockerfile, Kubernetes, CI/CD pipeline, and shell command generators. Each form posts through the BFF; output is editable and can be saved as an artifact when the API allows.

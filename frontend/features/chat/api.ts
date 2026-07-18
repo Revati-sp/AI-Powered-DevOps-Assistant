@@ -1,12 +1,15 @@
 import { apiFetch } from "@/lib/api/client";
 import { endpoints } from "@/lib/api/endpoints";
 import type { components } from "@/lib/api/generated-types";
+import { buildQueryString } from "@/lib/api/query-string";
 
 import type {
   ChatMessageRole,
   ChatMessageView,
   ConversationDetailView,
+  ConversationListFilters,
   ConversationListItem,
+  ConversationsPage,
 } from "@/features/chat/types";
 
 type ConversationSummary = components["schemas"]["ConversationSummary"];
@@ -35,12 +38,37 @@ function mapSummary(item: ConversationSummary): ConversationListItem {
     provider: item.provider,
     createdAt: item.created_at,
     updatedAt: item.updated_at,
+    organizationId: item.organization_id,
   };
 }
 
-export async function listConversations(): Promise<ConversationListItem[]> {
-  const data = await apiFetch<ConversationSummary[]>(endpoints.chat.conversations());
-  return (data ?? []).map(mapSummary);
+export async function listConversations(
+  filters: ConversationListFilters = {},
+): Promise<ConversationsPage> {
+  const query = buildQueryString({
+    limit: filters.limit ?? 30,
+    offset: filters.offset ?? 0,
+    search: filters.search?.trim() || undefined,
+    provider: filters.provider || undefined,
+    organization_id: filters.organization_id ?? undefined,
+    created_from: filters.created_from,
+    created_to: filters.created_to,
+    sort_by: filters.sort_by ?? "updated_at",
+    sort_order: filters.sort_order ?? "desc",
+  });
+  const data = await apiFetch<{
+    items: ConversationSummary[];
+    total: number;
+    limit: number;
+    offset: number;
+  }>(`${endpoints.chat.conversations()}${query}`);
+
+  return {
+    items: (data.items ?? []).map(mapSummary),
+    total: data.total,
+    limit: data.limit,
+    offset: data.offset,
+  };
 }
 
 export async function getConversation(conversationId: string): Promise<ConversationDetailView> {
@@ -51,6 +79,7 @@ export async function getConversation(conversationId: string): Promise<Conversat
     provider: data.provider,
     createdAt: data.created_at,
     updatedAt: data.updated_at,
+    organizationId: data.organization_id,
     messages: (data.messages ?? []).map(mapMessage),
   };
 }

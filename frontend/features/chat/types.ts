@@ -17,14 +17,29 @@ export type ConversationListItem = {
   provider: string;
   createdAt: string;
   updatedAt: string;
+  organizationId?: string | null;
 };
 
-export type ConversationDetailView = {
-  id: string;
-  title: string;
-  provider: string;
-  createdAt: string;
-  updatedAt: string;
+export type ConversationsPage = {
+  items: ConversationListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type ConversationListFilters = {
+  limit?: number;
+  offset?: number;
+  search?: string;
+  provider?: string;
+  organization_id?: string | null;
+  created_from?: string;
+  created_to?: string;
+  sort_by?: "created_at" | "updated_at" | "title";
+  sort_order?: "asc" | "desc";
+};
+
+export type ConversationDetailView = ConversationListItem & {
   messages: ChatMessageView[];
 };
 

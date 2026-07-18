@@ -4,6 +4,7 @@ import { apiFetch } from "@/lib/api/client";
 import { endpoints } from "@/lib/api/endpoints";
 import type {
   ChangePasswordFormValues,
+  EmailChangeRequestFormValues,
   ForgotPasswordFormValues,
   LoginFormValues,
   RegisterFormValues,
@@ -184,6 +185,22 @@ export async function changePasswordRequest(
   await authRouteFetch<null>("/api/auth/change-password", {
     method: "POST",
     body: values,
+  });
+}
+
+export async function requestEmailChange(
+  values: EmailChangeRequestFormValues,
+): Promise<void> {
+  await apiFetch<void>(endpoints.users.emailChangeRequest(), {
+    method: "POST",
+    body: values,
+  });
+}
+
+export async function confirmEmailChange(token: string): Promise<void> {
+  await authRouteFetch<null>("/api/auth/confirm-email-change", {
+    method: "POST",
+    body: { token },
   });
 }
 

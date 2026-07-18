@@ -31,6 +31,7 @@ class ConversationSummary(ORMModel):
     id: UUID
     title: str
     provider: str
+    organization_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
 

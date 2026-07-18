@@ -380,9 +380,7 @@ async def test_invitation_expired_persists_expired_status(
 
     db_session.expire_all()
     result = await db_session.execute(
-        select(OrganizationInvitation).where(
-            OrganizationInvitation.id == invitation_id
-        )
+        select(OrganizationInvitation).where(OrganizationInvitation.id == invitation_id)
     )
     stored = result.scalar_one()
     assert stored.status == InvitationStatus.EXPIRED

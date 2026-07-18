@@ -4,6 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Archive, FileCode2, Plus, Star } from "lucide-react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -60,32 +61,64 @@ import { artifactCreateSchema, type ArtifactCreateFormValues } from "@/features/
 import type { ArtifactSummaryResponse, ArtifactType } from "@/features/artifacts/types";
 import { isApiClientError } from "@/lib/api/errors";
 import { formatDateTime } from "@/lib/formatters/date";
+import { parseListQuery, serializeListQuery, type ListQueryState } from "@/lib/url/list-query";
 import { cn } from "@/lib/utils/cn";
 import { useWorkspaceStore } from "@/store/workspace-store";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 
 const PAGE_SIZE = 20;
-
-function useDebouncedValue<T>(value: T, delayMs = 300): T {
-  const [debounced, setDebounced] = React.useState(value);
-  React.useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(value), delayMs);
-    return () => window.clearTimeout(timer);
-  }, [value, delayMs]);
-  return debounced;
-}
 
 export function ArtifactsPageClient() {
   const role = useOrgRole();
   const organizationId = useWorkspaceStore((s) => s.currentOrganizationId);
-  const [pageIndex, setPageIndex] = React.useState(0);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const urlState = parseListQuery(searchParams);
+  const [pageIndex, setPageIndex] = React.useState(urlState.page - 1);
   const [createOpen, setCreateOpen] = React.useState(false);
-  const [typeFilter, setTypeFilter] = React.useState<string>("all");
-  const [searchInput, setSearchInput] = React.useState("");
-  const [tagFilter, setTagFilter] = React.useState<string>("all");
-  const [favoritesOnly, setFavoritesOnly] = React.useState(false);
-  const [includeArchived, setIncludeArchived] = React.useState(false);
+  const [typeFilter, setTypeFilter] = React.useState<string>(urlState.artifactType ?? "all");
+  const [searchInput, setSearchInput] = React.useState(urlState.search ?? "");
+  const [tagFilter, setTagFilter] = React.useState<string>(urlState.tag ?? "all");
+  const [favoritesOnly, setFavoritesOnly] = React.useState(urlState.favoritesOnly);
+  const [includeArchived, setIncludeArchived] = React.useState(urlState.includeArchived);
+  const [sortBy, setSortBy] = React.useState(urlState.sortBy ?? "updated_at");
+  const [sortOrder, setSortOrder] = React.useState<"asc" | "desc">(urlState.sortOrder ?? "desc");
 
   const debouncedSearch = useDebouncedValue(searchInput);
+  const updateUrl = React.useCallback((next: Partial<ListQueryState>) => {
+    const query = serializeListQuery(next, searchParams);
+    router.replace(query ? `${pathname}?${query}` : pathname);
+  }, [pathname, router, searchParams]);
+
+  React.useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setPageIndex(urlState.page - 1);
+      setSearchInput(urlState.search ?? "");
+      setTypeFilter(urlState.artifactType ?? "all");
+      setTagFilter(urlState.tag ?? "all");
+      setFavoritesOnly(urlState.favoritesOnly);
+      setIncludeArchived(urlState.includeArchived);
+      setSortBy(urlState.sortBy ?? "updated_at");
+      setSortOrder(urlState.sortOrder ?? "desc");
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    urlState.artifactType,
+    urlState.favoritesOnly,
+    urlState.includeArchived,
+    urlState.page,
+    urlState.search,
+    urlState.sortBy,
+    urlState.sortOrder,
+    urlState.tag,
+  ]);
+
+  React.useEffect(() => {
+    if (debouncedSearch !== (urlState.search ?? "")) {
+      updateUrl({ search: debouncedSearch || undefined, page: 1 });
+    }
+  }, [debouncedSearch, updateUrl, urlState.search]);
 
   const filters = {
     organization_id: organizationId,
@@ -95,6 +128,9 @@ export function ArtifactsPageClient() {
     tags: tagFilter !== "all" ? [tagFilter] : undefined,
     favorites_only: favoritesOnly,
     include_archived: includeArchived,
+    artifact_type: typeFilter !== "all" ? typeFilter : undefined,
+    sort_by: sortBy,
+    sort_order: sortOrder,
   };
 
   const { data, isLoading, isError, error, refetch } = useArtifacts(filters);
@@ -123,13 +159,7 @@ export function ArtifactsPageClient() {
     }
   }, [createOpen, form]);
 
-  const items = React.useMemo(() => {
-    const rows = data?.items ?? [];
-    if (typeFilter === "all") {
-      return rows;
-    }
-    return rows.filter((item) => item.artifact_type === typeFilter);
-  }, [data?.items, typeFilter]);
+  const items = data?.items ?? [];
 
   const toggleFavorite = React.useCallback(
     async (artifact: ArtifactSummaryResponse) => {
@@ -249,6 +279,7 @@ export function ArtifactsPageClient() {
       <ErrorState
         message={isApiClientError(error) ? error.message : "Failed to load artifacts"}
         requestId={isApiClientError(error) ? error.requestId : undefined}
+        retryAfterSeconds={isApiClientError(error) ? error.retryAfterSeconds : undefined}
         onRetry={() => void refetch()}
       />
     );
@@ -282,7 +313,6 @@ export function ArtifactsPageClient() {
             value={searchInput}
             onChange={(event) => {
               setSearchInput(event.target.value);
-              setPageIndex(0);
             }}
           />
         </div>
@@ -293,9 +323,10 @@ export function ArtifactsPageClient() {
             onValueChange={(value) => {
               setTypeFilter(value);
               setPageIndex(0);
+              updateUrl({ artifactType: value === "all" ? undefined : value, page: 1 });
             }}
           >
-            <SelectTrigger>
+            <SelectTrigger aria-label="Filter by type">
               <SelectValue placeholder="All types" />
             </SelectTrigger>
             <SelectContent>
@@ -315,9 +346,10 @@ export function ArtifactsPageClient() {
             onValueChange={(value) => {
               setTagFilter(value);
               setPageIndex(0);
+              updateUrl({ tag: value === "all" ? undefined : value, page: 1 });
             }}
           >
-            <SelectTrigger>
+            <SelectTrigger aria-label="Filter by tag">
               <SelectValue placeholder="All tags" />
             </SelectTrigger>
             <SelectContent>
@@ -338,6 +370,7 @@ export function ArtifactsPageClient() {
               onCheckedChange={(checked) => {
                 setFavoritesOnly(checked);
                 setPageIndex(0);
+                updateUrl({ favoritesOnly: checked, page: 1 });
               }}
             />
             <Label htmlFor="favorites-only">Favorites only</Label>
@@ -349,18 +382,38 @@ export function ArtifactsPageClient() {
               onCheckedChange={(checked) => {
                 setIncludeArchived(checked);
                 setPageIndex(0);
+                updateUrl({ includeArchived: checked, page: 1 });
               }}
             />
             <Label htmlFor="include-archived">Include archived</Label>
           </div>
         </div>
+        <div className="w-48 space-y-1">
+          <label className="text-muted-foreground text-xs">Sort</label>
+          <Select value={`${sortBy}:${sortOrder}`} onValueChange={(value) => {
+            const [nextSortBy, nextSortOrder] = value.split(":") as [string, "asc" | "desc"];
+            setSortBy(nextSortBy); setSortOrder(nextSortOrder); setPageIndex(0);
+            updateUrl({ sortBy: nextSortBy, sortOrder: nextSortOrder, page: 1 });
+          }}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="updated_at:desc">Recently updated</SelectItem>
+              <SelectItem value="created_at:desc">Recently created</SelectItem>
+              <SelectItem value="name:asc">Name A–Z</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <Button type="button" variant="ghost" onClick={() => {
+          setSearchInput(""); setTypeFilter("all"); setTagFilter("all"); setFavoritesOnly(false); setIncludeArchived(false); setSortBy("updated_at"); setSortOrder("desc"); setPageIndex(0);
+          router.replace(pathname);
+        }}>Clear filters</Button>
       </FilterBar>
 
       {items.length === 0 ? (
         <EmptyState
           icon={<FileCode2 />}
-          title="No artifacts yet"
-          description="Create an artifact or generate one from the generators."
+          title={searchInput || typeFilter !== "all" || tagFilter !== "all" || favoritesOnly || includeArchived ? "No artifacts match these filters" : "No artifacts yet"}
+          description={searchInput || typeFilter !== "all" || tagFilter !== "all" || favoritesOnly || includeArchived ? "Clear or change filters to see more artifacts." : "Create an artifact or generate one from the generators."}
           action={
             <PermissionGate permission="artifact.write" role={role}>
               <Button type="button" onClick={() => setCreateOpen(true)}>
@@ -379,7 +432,10 @@ export function ArtifactsPageClient() {
             pageSize: PAGE_SIZE,
             pageCount,
             totalRows: total,
-            onPageChange: setPageIndex,
+            onPageChange: (nextPage) => {
+              setPageIndex(nextPage);
+              updateUrl({ page: nextPage + 1 });
+            },
           }}
         />
       )}

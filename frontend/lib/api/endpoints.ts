@@ -26,6 +26,14 @@ export const endpoints = {
   users: {
     me: () => `${API_V1}/users/me`,
     meOnboarding: () => `${API_V1}/users/me/onboarding`,
+    emailChangeRequest: () => `${API_V1}/users/me/email-change/request`,
+    emailChangeConfirm: () => `${API_V1}/users/me/email-change/confirm`,
+  },
+  dashboard: {
+    summary: () => `${API_V1}/dashboard/summary`,
+    activity: () => `${API_V1}/dashboard/activity`,
+    findings: () => `${API_V1}/dashboard/findings`,
+    tasks: () => `${API_V1}/dashboard/tasks`,
   },
   usage: {
     me: () => `${API_V1}/usage/me`,

@@ -6,10 +6,13 @@ Production-style MVP backend that helps developers and DevOps engineers ask AI-p
 
 - JWT authentication with access + refresh tokens (rotation, reuse detection, logout-all)
 - Password reset, email verification, and session listing/revocation
+- Editable profiles (`PATCH /users/me`) plus separate email-change request/confirm flow
 - Password policy validation and bcrypt rehash on login
 - Platform roles (`user`, `admin`) plus organization RBAC
 - Organization invitations (create, accept, decline, resend, revoke)
+- Dashboard aggregate APIs (summary, activity, findings, tasks)
 - AI chat assistant with conversation history
+- Conversation list search, provider/org/date filters, sorting, and pagination
 - Multi-provider LLM support: **Gemini**, **Llama**, **Mistral**
 - Provider routing policies (platform + per-org) with circuit-breaker fallbacks
 - Usage quotas (organization + optional personal defaults)
@@ -18,7 +21,7 @@ Production-style MVP backend that helps developers and DevOps engineers ask AI-p
 - Log analysis (sync + Celery async)
 - Dockerfile, Kubernetes YAML, CI/CD pipeline, and shell command generators
 - Configuration security review (static checks + LLM enrichment)
-- Artifact tags, favorites, and archive
+- Artifact tags, favorites, archive, type/date filters, and sorting
 - User onboarding progress tracking
 - PostgreSQL persistence, Redis, Celery workers
 - Docker Compose local stack
@@ -155,6 +158,36 @@ See [../docs/authentication.md](../docs/authentication.md) and [../docs/security
 
 Configure `SECRET_KEY`, `REFRESH_TOKEN_PEPPER`, and JWT settings in `.env.example` (Auth section).
 
+## Profiles and email change
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v1/users/me` | Safe user profile (includes `display_name`, `timezone`, `job_title`, `avatar_url`) |
+| `PATCH /api/v1/users/me` | Update username / display name / timezone / job title / avatar URL |
+| `POST /api/v1/users/me/email-change/request` | Password-gated request; generic response |
+| `POST /api/v1/users/me/email-change/confirm` | One-time token confirm (unauthenticated); revokes all refresh sessions |
+
+Profile PATCH rejects role, email, password, and other security fields (`extra=forbid`). Username changes are uniqueness-checked and reserved-name blocked. Meaningful profile updates emit `user.profile.updated` audit events.
+
+## Dashboard aggregates
+
+Use these instead of stitching large list queries on the client:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v1/dashboard/summary` | Counts for conversations, artifacts, tasks, findings, usage, org |
+| `GET /api/v1/dashboard/activity` | Unified recent activity feed |
+| `GET /api/v1/dashboard/findings` | Severity counts (+ recent finding summaries) |
+| `GET /api/v1/dashboard/tasks` | Task status counts (+ recent task summaries) |
+
+Query params: optional `organization_id`, `time_range` (`24h` \| `7d` \| `30d`, default `7d`). Personal scope (no org) returns only the caller's data. Org scope enforces membership/RBAC. Findings are derived from persisted review `Analysis.result_json`.
+
+## Conversation list filters
+
+`GET /api/v1/chat/conversations` returns `Page[ConversationSummary]` (`items`, `total`, `limit`, `offset`).
+
+Filters/sort: `search` (title), `provider`, `organization_id`, `created_from`, `created_to`, `sort_by` (`created_at` \| `updated_at` \| `title`), `sort_order`, `limit` (default 20, max 100), `offset`. Summaries include `organization_id` and never embed message history.
+
 ## Organizations and RBAC
 
 Organizations are team workspaces with roles (`owner`, `admin`, `member`, `viewer`). Personal resources keep `organization_id = null`.
@@ -174,6 +207,8 @@ Generated artifacts support version history, unified diffs, and restore-as-new-v
 - `GET/POST /api/v1/artifacts/{id}/versions`
 - `POST /api/v1/artifacts/{id}/versions/{n}/restore`
 - `GET /api/v1/artifacts/{id}/diff`
+
+List filters: `search`, `tags`, `favorites_only`, `include_archived`, `archived_only`, `creator_id`, `artifact_type`, `organization_id`, `created_from`/`created_to`, `updated_from`/`updated_to`, `sort_by` (`created_at` \| `updated_at` \| `name` \| `artifact_type` \| `current_version_number`), `sort_order`, `limit`, `offset`. Default list excludes archived artifacts. List responses omit full content.
 
 Generators accept optional `save_artifact`, `artifact_name`, and `organization_id` fields.
 

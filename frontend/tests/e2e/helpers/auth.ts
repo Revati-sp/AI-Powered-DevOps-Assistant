@@ -17,6 +17,15 @@ const EMPTY_PAGE = {
   offset: 0,
 };
 
+const DASHBOARD_SUMMARY = {
+  conversations: { total: 2, recent: 1 },
+  artifacts: { total: 3, favorites: 1, archived: 0 },
+  tasks: { queued: 0, running: 1, succeeded: 4, failed: 0 },
+  findings: { critical: 0, high: 1, medium: 2, low: 3 },
+  usage: { requests_used: 25, requests_limit: 100 },
+  organization: null,
+};
+
 function json(data: unknown, status = 200) {
   return {
     status,
@@ -66,12 +75,42 @@ export async function mockAuthRoutes(page: Page): Promise<void> {
  * Mock BFF proxy traffic (`/api/bff/**`) with empty, successful envelopes.
  */
 export async function mockBffRoutes(page: Page): Promise<void> {
+  let profile = { ...MOCK_USER, display_name: "E2E User", timezone: "UTC" };
+
   await page.route("**/api/bff/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace(/^\/api\/bff/, "");
 
-    if (path.startsWith("/api/v1/chat/conversations")) {
+    if (path === "/api/v1/users/me") {
+      if (route.request().method() === "PATCH") {
+        profile = { ...profile, ...(route.request().postDataJSON() as object) };
+      }
+      await route.fulfill(json({ success: true, data: profile }));
+      return;
+    }
+
+    if (path === "/api/v1/dashboard/summary") {
+      await route.fulfill(json({ success: true, data: DASHBOARD_SUMMARY }));
+      return;
+    }
+
+    if (path === "/api/v1/dashboard/activity") {
       await route.fulfill(json({ success: true, data: [] }));
+      return;
+    }
+
+    if (path === "/api/v1/dashboard/findings") {
+      await route.fulfill(json({ success: true, data: DASHBOARD_SUMMARY.findings }));
+      return;
+    }
+
+    if (path === "/api/v1/dashboard/tasks") {
+      await route.fulfill(json({ success: true, data: DASHBOARD_SUMMARY.tasks }));
+      return;
+    }
+
+    if (path.startsWith("/api/v1/chat/conversations")) {
+      await route.fulfill(json({ success: true, data: EMPTY_PAGE }));
       return;
     }
 

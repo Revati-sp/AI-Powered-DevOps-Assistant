@@ -7,7 +7,7 @@ import { SectionHeader } from "@/components/data-display/section-header";
 import { EmptyState } from "@/components/feedback/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { TaskStatusCounts } from "@/features/dashboard/api";
+import type { DashboardTaskCounts } from "@/features/dashboard/api";
 
 const TaskStatusChartInner = dynamic(
   () =>
@@ -24,7 +24,7 @@ export function TaskStatusChart({
   counts,
   loading,
 }: {
-  counts: TaskStatusCounts;
+  counts: DashboardTaskCounts;
   loading?: boolean;
 }) {
   const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
@@ -32,7 +32,7 @@ export function TaskStatusChart({
   return (
     <Card className="h-full">
       <CardContent className="space-y-4 p-6">
-        <SectionHeader title="Task status" description="Distribution from the latest 20 tasks" />
+        <SectionHeader title="Task status" description="Task distribution for the selected period" />
 
         {loading ? (
           <Skeleton className="h-56 w-full" />

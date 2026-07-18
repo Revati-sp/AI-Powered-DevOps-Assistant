@@ -18,9 +18,7 @@ export function WorkspaceStatus({
   loading?: boolean;
 }) {
   const currentOrganizationId = useWorkspaceStore((state) => state.currentOrganizationId);
-  const organizations = snapshot?.organizations ?? [];
-  const activeOrg =
-    organizations.find((org) => org.id === currentOrganizationId) ?? organizations[0];
+  const organization = snapshot?.summary?.organization;
 
   return (
     <Card className="h-full">
@@ -32,7 +30,7 @@ export function WorkspaceStatus({
             <Skeleton className="h-16 w-full" />
             <Skeleton className="h-10 w-2/3" />
           </div>
-        ) : !activeOrg ? (
+        ) : !organization ? (
           <EmptyState
             className="py-8"
             icon={<Building2 />}
@@ -45,17 +43,17 @@ export function WorkspaceStatus({
               <p className="text-muted-foreground text-xs tracking-wide uppercase">
                 Active organization
               </p>
-              <p className="mt-1 text-lg font-semibold">{activeOrg.name}</p>
-              <p className="text-muted-foreground text-sm">/{activeOrg.slug}</p>
+              <p className="mt-1 text-lg font-semibold">Selected workspace</p>
+              <p className="text-muted-foreground text-sm">Organization aggregate data</p>
             </div>
 
             <div className="text-muted-foreground flex items-center gap-2 text-sm">
               <Users className="h-4 w-4" />
-              <span>Member count unavailable without an additional members request.</span>
+              <span>{organization.member_count} members · {organization.active_policy_packs} active policy packs</span>
             </div>
 
             <Link
-              href={`/organizations/${activeOrg.id}`}
+              href={currentOrganizationId ? `/organizations/${currentOrganizationId}` : "/organizations"}
               className="text-primary text-sm font-medium hover:underline"
             >
               View organization

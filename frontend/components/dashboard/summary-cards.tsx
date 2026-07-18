@@ -1,4 +1,4 @@
-import { Building2, FileCode2, ListTodo, MessageSquare } from "lucide-react";
+import { FileCode2, ListTodo, MessageSquare, ShieldAlert } from "lucide-react";
 
 import { StatCard } from "@/components/data-display/stat-card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,37 +21,41 @@ export function SummaryCards({
     );
   }
 
-  const totals = snapshot?.totals;
+  const summary = snapshot?.summary;
   const activeTasks =
-    (snapshot?.taskStatusCounts.queued ?? 0) + (snapshot?.taskStatusCounts.running ?? 0);
+    (summary?.tasks.queued ?? 0) + (summary?.tasks.running ?? 0);
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
         label="Conversations"
-        value={totals?.conversations ?? "—"}
-        description="Recent chats available in this workspace"
+        value={summary?.conversations.total ?? "—"}
+        description={`${summary?.conversations.recent ?? 0} recent in selected period`}
         icon={<MessageSquare />}
       />
       <StatCard
         label="Artifacts"
-        value={totals?.artifacts ?? "—"}
-        description="Generated configs and reviews"
+        value={summary?.artifacts.total ?? "—"}
+        description={`${summary?.artifacts.favorites ?? 0} favorites · ${summary?.artifacts.archived ?? 0} archived`}
         icon={<FileCode2 />}
       />
       <StatCard
         label="Tasks"
-        value={totals?.tasks ?? "—"}
+        value={
+          summary
+            ? summary.tasks.queued + summary.tasks.running + summary.tasks.succeeded + summary.tasks.failed
+            : "—"
+        }
         description={
           activeTasks > 0 ? `${activeTasks} currently active` : "No active background jobs"
         }
         icon={<ListTodo />}
       />
       <StatCard
-        label="Organizations"
-        value={totals?.organizations ?? "—"}
-        description="Workspaces you can access"
-        icon={<Building2 />}
+        label="Findings"
+        value={summary ? summary.findings.critical + summary.findings.high : "—"}
+        description={`${summary?.findings.critical ?? 0} critical · ${summary?.findings.high ?? 0} high`}
+        icon={<ShieldAlert />}
       />
     </div>
   );

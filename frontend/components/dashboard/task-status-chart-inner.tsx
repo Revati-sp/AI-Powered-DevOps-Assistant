@@ -2,18 +2,17 @@
 
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-import type { TaskStatusCounts } from "@/features/dashboard/api";
+import type { DashboardTaskCounts } from "@/features/dashboard/api";
 
-const STATUS_COLORS: Record<keyof TaskStatusCounts, string> = {
+const STATUS_COLORS: Record<keyof DashboardTaskCounts, string> = {
   queued: "var(--chart-4)",
   running: "var(--chart-2)",
   succeeded: "var(--chart-1)",
   failed: "var(--chart-5)",
-  cancelled: "var(--muted-foreground)",
 };
 
-export function TaskStatusChartInner({ counts }: { counts: TaskStatusCounts }) {
-  const data = (Object.entries(counts) as [keyof TaskStatusCounts, number][]).map(
+export function TaskStatusChartInner({ counts }: { counts: DashboardTaskCounts }) {
+  const data = (Object.entries(counts) as [keyof DashboardTaskCounts, number][]).map(
     ([status, value]) => ({
       status,
       value,

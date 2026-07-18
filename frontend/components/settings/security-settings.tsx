@@ -14,6 +14,7 @@ import { ErrorState } from "@/components/feedback/error-state";
 import { LoadingState } from "@/components/feedback/loading-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Form,
   FormControl,
@@ -24,9 +25,14 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { PasswordInput } from "@/components/ui/password-input";
-import { logoutAllRequest, logoutRequest } from "@/features/auth/api";
+import { logoutAllRequest, logoutRequest, requestEmailChange } from "@/features/auth/api";
 import { useChangePassword, useRevokeSession, useSessions } from "@/features/auth/hooks";
-import { changePasswordSchema, type ChangePasswordFormValues } from "@/features/auth/schemas";
+import {
+  changePasswordSchema,
+  emailChangeRequestSchema,
+  type ChangePasswordFormValues,
+  type EmailChangeRequestFormValues,
+} from "@/features/auth/schemas";
 import type { SessionResponse } from "@/features/auth/types";
 import { isApiClientError } from "@/lib/api/errors";
 import { formatDateTime, formatRelative } from "@/lib/formatters/date";
@@ -58,6 +64,10 @@ export function SecuritySettings() {
       new_password: "",
       confirm_password: "",
     },
+  });
+  const emailChangeForm = useForm<EmailChangeRequestFormValues>({
+    resolver: zodResolver(emailChangeRequestSchema),
+    defaultValues: { new_email: "", password: "" },
   });
 
   const handleLogout = async () => {
@@ -103,6 +113,18 @@ export function SecuritySettings() {
       void refetchSessions();
     } catch (err) {
       toast.error(isApiClientError(err) ? err.message : "Failed to change password");
+    }
+  });
+
+  const handleEmailChange = emailChangeForm.handleSubmit(async (values) => {
+    try {
+      await requestEmailChange(values);
+      emailChangeForm.reset();
+      toast.success("Confirmation email sent", {
+        description: "Open the link sent to your new email address to complete the change.",
+      });
+    } catch (err) {
+      toast.error(isApiClientError(err) ? err.message : "Failed to request email change");
     }
   });
 
@@ -204,6 +226,60 @@ export function SecuritySettings() {
 
             <Button type="submit" disabled={changePasswordMutation.isPending}>
               {changePasswordMutation.isPending ? "Updating…" : "Update password"}
+            </Button>
+          </form>
+        </Form>
+      </section>
+
+      <section className="max-w-lg space-y-4" aria-labelledby="change-email-heading">
+        <div className="space-y-1">
+          <h2 id="change-email-heading" className="text-sm font-medium">
+            Change email address
+          </h2>
+          <p className="text-muted-foreground text-xs">
+            Confirm your password, then use the link sent to the new email address.
+          </p>
+        </div>
+
+        <Form {...emailChangeForm}>
+          <form onSubmit={handleEmailChange} className="space-y-4 rounded-md border p-4">
+            <FormField
+              control={emailChangeForm.control}
+              name="new_email"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>New email address</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="email"
+                      autoComplete="email"
+                      disabled={emailChangeForm.formState.isSubmitting}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={emailChangeForm.control}
+              name="password"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Current password</FormLabel>
+                  <FormControl>
+                    <PasswordInput
+                      autoComplete="current-password"
+                      disabled={emailChangeForm.formState.isSubmitting}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <Button type="submit" disabled={emailChangeForm.formState.isSubmitting}>
+              {emailChangeForm.formState.isSubmitting ? "Sending…" : "Send confirmation email"}
             </Button>
           </form>
         </Form>

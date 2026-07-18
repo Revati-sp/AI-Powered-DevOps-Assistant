@@ -20,7 +20,7 @@ export function RecentActivity({
       <CardContent className="space-y-4 p-6">
         <SectionHeader
           title="Recent activity"
-          description="Latest conversations, artifacts, and tasks"
+          description="Latest activity from your selected workspace"
         />
 
         {loading ? (
@@ -41,15 +41,17 @@ export function RecentActivity({
             {items.map((item) => (
               <li key={item.id}>
                 <Link
-                  href={item.href}
+                  href={item.route_target}
                   className="hover:bg-primary/5 border-border flex items-start justify-between gap-3 rounded-lg border px-3 py-2.5 transition-colors"
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{item.title}</p>
-                    <p className="text-muted-foreground truncate text-xs">{item.subtitle}</p>
+                    <p className="text-muted-foreground truncate text-xs">
+                      {item.type}{item.status ? ` · ${item.status}` : ""}
+                    </p>
                   </div>
-                  <time className="text-muted-foreground shrink-0 text-xs" dateTime={item.at}>
-                    {formatRelative(item.at)}
+                  <time className="text-muted-foreground shrink-0 text-xs" dateTime={item.timestamp}>
+                    {formatRelative(item.timestamp)}
                   </time>
                 </Link>
               </li>

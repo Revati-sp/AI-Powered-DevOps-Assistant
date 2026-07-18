@@ -7,6 +7,36 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
+async def test_artifact_list_type_sort_and_content_omission(
+    client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    for name, artifact_type in [
+        ("Zulu Manifest", "kubernetes"),
+        ("Alpha Dockerfile", "dockerfile"),
+    ]:
+        created = await client.post(
+            "/api/v1/artifacts",
+            headers=auth_headers,
+            json={
+                "name": name,
+                "artifact_type": artifact_type,
+                "content": "secret-content",
+            },
+        )
+        assert created.status_code == 200, created.text
+
+    listed = await client.get(
+        "/api/v1/artifacts",
+        headers=auth_headers,
+        params={"artifact_type": "dockerfile", "sort_by": "name", "sort_order": "asc"},
+    )
+    assert listed.status_code == 200, listed.text
+    items = listed.json()["data"]["items"]
+    assert [item["name"] for item in items] == ["Alpha Dockerfile"]
+    assert "content" not in items[0]
+
+
+@pytest.mark.asyncio
 async def test_create_personal_artifact_with_version_one(
     client: AsyncClient, auth_headers: dict[str, str]
 ) -> None:

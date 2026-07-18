@@ -129,9 +129,11 @@ class ArtifactRepository:
         status: AnalysisStatus = AnalysisStatus.PENDING,
         result_json: dict[str, Any] | None = None,
         task_id: str | None = None,
+        organization_id: UUID | None = None,
     ) -> Analysis:
         analysis = Analysis(
             user_id=user_id,
+            organization_id=organization_id,
             analysis_type=analysis_type,
             input_preview=input_preview,
             status=status,

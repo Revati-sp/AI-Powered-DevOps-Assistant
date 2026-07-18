@@ -13,14 +13,17 @@ import { ConfirmationDialog } from "@/components/feedback/confirmation-dialog";
 import { EmptyState } from "@/components/feedback/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { deleteConversation, listConversations } from "@/features/chat/api";
 import type { ConversationDateGroup, ConversationListItem } from "@/features/chat/types";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { isApiClientError } from "@/lib/api/errors";
 import { queryKeys } from "@/lib/api/query-keys";
 import { formatRelative } from "@/lib/formatters/date";
 import { cn } from "@/lib/utils/cn";
+import { useWorkspaceStore } from "@/store/workspace-store";
 
 function groupConversations(items: ConversationListItem[]): ConversationDateGroup[] {
   const groups: ConversationDateGroup[] = [];
@@ -67,11 +70,24 @@ export function ConversationSidebar({
   const router = useRouter();
   const queryClient = useQueryClient();
   const [search, setSearch] = React.useState("");
+  const [provider, setProvider] = React.useState<string>("all");
+  const [offset, setOffset] = React.useState(0);
   const [pendingDeleteId, setPendingDeleteId] = React.useState<string | null>(null);
+  const organizationId = useWorkspaceStore((state) => state.currentOrganizationId);
+  const debouncedSearch = useDebouncedValue(search);
+  const filters = {
+    limit: 30,
+    offset,
+    search: debouncedSearch || undefined,
+    provider: provider === "all" ? undefined : provider,
+    organization_id: organizationId,
+    sort_by: "updated_at" as const,
+    sort_order: "desc" as const,
+  };
 
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: queryKeys.conversations.list(),
-    queryFn: listConversations,
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
+    queryKey: queryKeys.conversations.list(filters),
+    queryFn: () => listConversations(filters),
   });
 
   const deleteMutation = useMutation({
@@ -91,19 +107,7 @@ export function ConversationSidebar({
     },
   });
 
-  const filtered = React.useMemo(() => {
-    const items = data ?? [];
-    const query = search.trim().toLowerCase();
-    if (!query) {
-      return items;
-    }
-    return items.filter(
-      (item) =>
-        item.title.toLowerCase().includes(query) || item.provider.toLowerCase().includes(query),
-    );
-  }, [data, search]);
-
-  const groups = React.useMemo(() => groupConversations(filtered), [filtered]);
+  const groups = React.useMemo(() => groupConversations(data?.items ?? []), [data?.items]);
 
   return (
     <aside
@@ -120,12 +124,24 @@ export function ConversationSidebar({
           <Search className="text-muted-foreground absolute top-2.5 left-2.5 h-4 w-4" />
           <Input
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setOffset(0);
+            }}
             placeholder="Search conversations"
             className="pl-8"
             aria-label="Search conversations"
           />
         </div>
+        <Select value={provider} onValueChange={(value) => { setProvider(value); setOffset(0); }}>
+          <SelectTrigger aria-label="Filter by provider"><SelectValue placeholder="All providers" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All providers</SelectItem>
+            <SelectItem value="gemini">Gemini</SelectItem>
+            <SelectItem value="llama">Llama</SelectItem>
+            <SelectItem value="mistral">Mistral</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <ScrollArea className="min-h-0 flex-1 px-2 pb-3">
@@ -137,10 +153,12 @@ export function ConversationSidebar({
           </div>
         ) : isError ? (
           <div className="p-3 text-center">
-            <p className="text-muted-foreground mb-2 text-sm">Could not load conversations.</p>
-            <Button size="sm" variant="outline" onClick={() => refetch()}>
-              Retry
-            </Button>
+            <p className="text-muted-foreground mb-2 text-sm">
+              {isApiClientError(error)
+                ? `${error.message}${error.retryAfterSeconds !== undefined ? ` Try again in ${error.retryAfterSeconds}s.` : ""}${error.requestId ? ` (Request ID: ${error.requestId})` : ""}`
+                : "Could not load conversations."}
+            </p>
+            <Button size="sm" variant="outline" onClick={() => refetch()}>Retry</Button>
           </div>
         ) : groups.length === 0 ? (
           <EmptyState
@@ -203,6 +221,11 @@ export function ConversationSidebar({
                 </ul>
               </div>
             ))}
+            <div className="flex items-center justify-between px-2">
+              <Button size="sm" variant="ghost" disabled={offset === 0 || isFetching} onClick={() => setOffset((value) => Math.max(0, value - 30))}>Previous</Button>
+              <span className="text-muted-foreground text-xs">{offset + 1}–{Math.min(offset + 30, data?.total ?? 0)} of {data?.total ?? 0}</span>
+              <Button size="sm" variant="ghost" disabled={!data || offset + data.limit >= data.total || isFetching} onClick={() => setOffset((value) => value + 30)}>Next</Button>
+            </div>
           </div>
         )}
       </ScrollArea>

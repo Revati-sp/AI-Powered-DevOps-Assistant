@@ -108,7 +108,9 @@ class ProviderManagementService:
                 model_env_key = model_key
                 default_model = default_model or _model
         else:
-            existing = await self.configs.get_config(name, organization_id=organization_id)
+            existing = await self.configs.get_config(
+                name, organization_id=organization_id
+            )
             if existing is None:
                 platform = await self.configs.get_config(name, organization_id=None)
                 if platform is not None:

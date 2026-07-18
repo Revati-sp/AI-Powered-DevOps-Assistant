@@ -14,6 +14,14 @@ export const queryKeys = {
     list: (filters: QueryFilters = {}) => ["conversations", "list", filters] as const,
     detail: (id: string) => ["conversations", "detail", id] as const,
   },
+  dashboard: {
+    all: () => ["dashboard"] as const,
+    summary: (filters: QueryFilters = {}) => ["dashboard", "summary", filters] as const,
+    activity: (filters: QueryFilters = {}) => ["dashboard", "activity", filters] as const,
+    findings: (filters: QueryFilters = {}) => ["dashboard", "findings", filters] as const,
+    tasks: (filters: QueryFilters = {}) => ["dashboard", "tasks", filters] as const,
+    snapshot: (filters: QueryFilters = {}) => ["dashboard", "snapshot", filters] as const,
+  },
   organizations: {
     all: () => ["organizations"] as const,
     list: (filters: QueryFilters = {}) => ["organizations", "list", filters] as const,
