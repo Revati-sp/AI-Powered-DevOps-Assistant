@@ -38,6 +38,18 @@ docker compose up --build
 
 Backend-only Compose still works from `backend/` without the frontend.
 
+## Deployment
+
+Production target: **Render** (staging + production). See:
+
+- [Deployment](docs/deployment.md)
+- [Staging](docs/staging.md)
+- [Production](docs/production.md)
+- [Email (Postmark SMTP)](docs/email.md)
+- [Monitoring](docs/monitoring.md)
+- [Rollback](docs/rollback.md)
+- [Render blueprints](deploy/render/)
+
 ## Documentation
 
 | Doc | Description |
@@ -51,6 +63,12 @@ Backend-only Compose still works from `backend/` without the frontend.
 | [API errors](docs/api-errors.md) | Stable error codes |
 | [Operations](docs/operations.md) | Docker, migrations, observability |
 | [Development](docs/development.md) | Local setup and quality checks |
+| [Deployment](docs/deployment.md) | Render platform, architecture, secrets |
+| [Staging](docs/staging.md) | Staging secrets, smoke tests, reset |
+| [Production](docs/production.md) | Production release checklist |
+| [Email](docs/email.md) | Postmark / Mailpit configuration |
+| [Monitoring](docs/monitoring.md) | Metrics, OTEL, log fields |
+| [Rollback](docs/rollback.md) | App rollback and migration limits |
 
 ## Security highlights
 

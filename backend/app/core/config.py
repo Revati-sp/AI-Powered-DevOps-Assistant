@@ -50,20 +50,31 @@ class Settings(BaseSettings):
 
     email_enabled: bool = False
     email_verification_required: bool = False
+    # smtp | console — console is for local/dev only; blocked in staging/production.
+    email_provider: Literal["smtp", "console"] = "smtp"
+    email_from_name: str = "AI-Powered DevOps Assistant"
+    email_from_address: str = ""
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_from_email: str = ""
     smtp_use_tls: bool = True
+    email_request_timeout_seconds: int = 30
+    email_max_retries: int = 2
+    email_log_bodies: bool = False
     password_reset_token_minutes: int = 60
     email_verification_token_minutes: int = 1440
     invitation_expire_hours: int = 168
     frontend_base_url: str = "http://localhost:3000"
+    # Optional alias used in deploy docs; wins over frontend_base_url when set.
+    app_public_url: str = ""
 
     database_url: str = (
         "postgresql+asyncpg://devops:devops@localhost:5432/devops_assistant"
     )
+    log_format: Literal["text", "json"] = "text"
+    log_service_name: str = "api"
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
@@ -145,6 +156,19 @@ class Settings(BaseSettings):
     hsts_include_subdomains: bool = True
     hsts_preload: bool = False
 
+    @field_validator("database_url")
+    @classmethod
+    def normalize_database_url(cls, value: str) -> str:
+        """Accept managed-provider URLs (postgresql://) for async SQLAlchemy."""
+        normalized = value.strip()
+        if normalized.startswith("postgres://"):
+            normalized = "postgresql://" + normalized.removeprefix("postgres://")
+        if normalized.startswith("postgresql://"):
+            normalized = "postgresql+asyncpg://" + normalized.removeprefix(
+                "postgresql://"
+            )
+        return normalized
+
     @field_validator("jwt_algorithm")
     @classmethod
     def validate_jwt_algorithm(cls, value: str) -> str:
@@ -178,6 +202,19 @@ class Settings(BaseSettings):
         return self.app_env == "production"
 
     @property
+    def is_deployed_env(self) -> bool:
+        return self.app_env in ("staging", "production")
+
+    @property
+    def public_frontend_url(self) -> str:
+        base = self.app_public_url or self.frontend_base_url
+        return base.rstrip("/")
+
+    @property
+    def effective_from_email(self) -> str:
+        return (self.email_from_address or self.smtp_from_email).strip()
+
+    @property
     def effective_llm_timeout(self) -> int:
         return self.llm_request_timeout_seconds or self.llm_timeout_seconds
 
@@ -203,15 +240,16 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_cors_in_production(self) -> Self:
-        if self.is_production and "*" in self.cors_origins:
+        if self.is_deployed_env and "*" in self.cors_origins:
             raise ValueError(
-                "CORS misconfiguration: wildcard origin is not allowed in production "
-                "when credentials are enabled"
+                "CORS misconfiguration: wildcard origin is not allowed in "
+                f"{self.app_env} when credentials are enabled"
             )
         return self
 
     def validate_production_secrets(self) -> None:
-        if not self.is_production:
+        """Validate secrets and email delivery for staging and production."""
+        if not self.is_deployed_env:
             return
 
         secret_key_normalized = self.secret_key.strip().lower()
@@ -222,7 +260,7 @@ class Settings(BaseSettings):
         ):
             raise ValueError(
                 "SECRET_KEY must be at least 32 characters and not a known default "
-                "value in production."
+                f"value in {self.app_env}."
             )
 
         pepper_normalized = self.refresh_token_pepper.strip().lower()
@@ -233,8 +271,21 @@ class Settings(BaseSettings):
         ):
             raise ValueError(
                 "REFRESH_TOKEN_PEPPER must be at least 32 characters and not a known "
-                "default value in production."
+                f"default value in {self.app_env}."
             )
+
+        if self.email_enabled and self.email_provider == "console":
+            raise ValueError(
+                "EMAIL_PROVIDER=console is not allowed in staging or production. "
+                "Configure SMTP (e.g. Postmark) instead."
+            )
+
+        if self.email_enabled and self.email_provider == "smtp":
+            if not self.smtp_host or not self.effective_from_email:
+                raise ValueError(
+                    "EMAIL_ENABLED requires SMTP_HOST and "
+                    "EMAIL_FROM_ADDRESS (or SMTP_FROM_EMAIL) in staging/production."
+                )
 
 
 @lru_cache

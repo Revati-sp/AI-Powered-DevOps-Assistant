@@ -1,0 +1,226 @@
+# Render Blueprint — staging
+# Create a Blueprint in the Render dashboard pointing at this file.
+# Domains below are placeholders; replace after custom domains are attached.
+#
+# Secrets (sync: false) must be set in the Render dashboard / env groups.
+# Never commit real credentials.
+
+services:
+  - type: web
+    name: ada-api-staging
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    dockerCommand: uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 30
+    preDeployCommand: sh scripts/deploy_migrate.sh
+    healthCheckPath: /ready
+    numInstances: 1
+    maxShutdownDelaySeconds: 30
+    autoDeployTrigger: "off"
+    envVars:
+      - key: APP_ENV
+        value: staging
+      - key: DEBUG
+        value: "false"
+      - key: LOG_FORMAT
+        value: json
+      - key: LOG_SERVICE_NAME
+        value: api
+      - key: DOCS_ENABLED
+        value: "false"
+      - key: OPENAPI_ENABLED
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ada-postgres-staging
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: ada-redis-staging
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: keyvalue
+          name: ada-redis-staging
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: keyvalue
+          name: ada-redis-staging
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+      - key: REFRESH_TOKEN_PEPPER
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: FRONTEND_BASE_URL
+        sync: false
+      - key: APP_PUBLIC_URL
+        sync: false
+      - key: TRUSTED_PROXY_COUNT
+        value: "1"
+      - key: HSTS_ENABLED
+        value: "true"
+      - key: METRICS_ENABLED
+        value: "true"
+      - key: METRICS_REQUIRE_AUTH
+        value: "true"
+      - key: EMAIL_ENABLED
+        value: "true"
+      - key: EMAIL_PROVIDER
+        value: smtp
+      - key: EMAIL_FROM_NAME
+        value: AI-Powered DevOps Assistant (Staging)
+      - key: EMAIL_FROM_ADDRESS
+        sync: false
+      - key: SMTP_HOST
+        value: smtp.postmarkapp.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USE_TLS
+        value: "true"
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: EMAIL_REQUEST_TIMEOUT_SECONDS
+        value: "30"
+      - key: EMAIL_MAX_RETRIES
+        value: "2"
+      - key: EMAIL_LOG_BODIES
+        value: "false"
+      - key: OTEL_ENABLED
+        value: "true"
+      - key: OTEL_SERVICE_NAME
+        value: ada-api-staging
+      - key: OTEL_EXPORTER_OTLP_ENDPOINT
+        sync: false
+      - key: OTEL_EXPORTER_OTLP_HEADERS
+        sync: false
+      - key: OTEL_TRACES_SAMPLE_RATIO
+        value: "0.2"
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: CELERY_TASK_SOFT_TIME_LIMIT_SECONDS
+        value: "540"
+      - key: CELERY_TASK_TIME_LIMIT_SECONDS
+        value: "600"
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+
+  - type: worker
+    name: ada-worker-staging
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    dockerCommand: celery -A app.workers.celery_app.celery_app worker --loglevel=info --concurrency=2
+    numInstances: 1
+    maxShutdownDelaySeconds: 60
+    autoDeployTrigger: "off"
+    envVars:
+      - key: APP_ENV
+        value: staging
+      - key: DEBUG
+        value: "false"
+      - key: LOG_FORMAT
+        value: json
+      - key: LOG_SERVICE_NAME
+        value: worker
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ada-postgres-staging
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: ada-redis-staging
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: keyvalue
+          name: ada-redis-staging
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: keyvalue
+          name: ada-redis-staging
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+      - key: REFRESH_TOKEN_PEPPER
+        sync: false
+      - key: OTEL_ENABLED
+        value: "true"
+      - key: OTEL_SERVICE_NAME
+        value: ada-worker-staging
+      - key: OTEL_EXPORTER_OTLP_ENDPOINT
+        sync: false
+      - key: OTEL_EXPORTER_OTLP_HEADERS
+        sync: false
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: CELERY_TASK_SOFT_TIME_LIMIT_SECONDS
+        value: "540"
+      - key: CELERY_TASK_TIME_LIMIT_SECONDS
+        value: "600"
+      - key: EMAIL_ENABLED
+        value: "false"
+
+  - type: web
+    name: ada-frontend-staging
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    healthCheckPath: /
+    numInstances: 1
+    maxShutdownDelaySeconds: 30
+    autoDeployTrigger: "off"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
+      - key: AUTH_COOKIE_DOMAIN
+        sync: false
+      - key: NEXT_PUBLIC_APP_NAME
+        value: AI-Powered DevOps Assistant
+      - key: NEXT_PUBLIC_API_BASE_URL
+        sync: false
+      # Private service-to-service URL (Render private network).
+      - key: INTERNAL_API_BASE_URL
+        value: http://ada-api-staging:8000
+      - key: HOSTNAME
+        value: "0.0.0.0"
+      - key: PORT
+        value: "3000"
+
+  - type: keyvalue
+    name: ada-redis-staging
+    plan: starter
+    region: oregon
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
+    persistenceMode: journal-snapshot
+
+databases:
+  - name: ada-postgres-staging
+    plan: basic-256mb
+    region: oregon
+    postgresMajorVersion: "16"
+    databaseName: ada_staging
+    user: ada_staging
+    ipAllowList: []

@@ -303,9 +303,7 @@ class AuthService:
             + timedelta(minutes=settings.password_reset_token_minutes),
             created_ip=audit_context.ip_address if audit_context else None,
         )
-        reset_url = (
-            f"{settings.frontend_base_url.rstrip('/')}/reset-password?token={raw_token}"
-        )
+        reset_url = f"{settings.public_frontend_url}/reset-password?token={raw_token}"
         await self.email.send_password_reset(to=user.email, reset_url=reset_url)
         await self.audit.record_event(
             action="user.password_reset.requested",
@@ -438,9 +436,7 @@ class AuthService:
             + timedelta(minutes=settings.email_verification_token_minutes),
             created_ip=audit_context.ip_address if audit_context else None,
         )
-        verify_url = (
-            f"{settings.frontend_base_url.rstrip('/')}/verify-email?token={raw_token}"
-        )
+        verify_url = f"{settings.public_frontend_url}/verify-email?token={raw_token}"
         await self.email.send_email_verification(to=user.email, verify_url=verify_url)
         await self.audit.record_event(
             action="user.email_verification.sent",

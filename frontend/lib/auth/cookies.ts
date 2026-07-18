@@ -22,13 +22,28 @@ function isCookieSecure(): boolean {
   return process.env.NODE_ENV === "production";
 }
 
+function cookieSameSite(): "lax" | "strict" | "none" {
+  const raw = (process.env.AUTH_COOKIE_SAMESITE || "lax").toLowerCase();
+  if (raw === "strict" || raw === "none" || raw === "lax") {
+    return raw;
+  }
+  return "lax";
+}
+
+function cookieDomain(): string | undefined {
+  const domain = process.env.AUTH_COOKIE_DOMAIN?.trim();
+  return domain ? domain : undefined;
+}
+
 function baseCookieOptions(maxAge: number) {
+  const domain = cookieDomain();
   return {
     httpOnly: true,
     secure: isCookieSecure(),
-    sameSite: "lax" as const,
+    sameSite: cookieSameSite(),
     path: "/",
     maxAge,
+    ...(domain ? { domain } : {}),
   };
 }
 

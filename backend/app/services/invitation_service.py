@@ -83,7 +83,9 @@ class InvitationService:
             + timedelta(hours=settings.invitation_expire_hours),
             created_ip=audit_context.ip_address if audit_context else None,
         )
-        invite_url = f"{settings.frontend_base_url.rstrip('/')}/invitations/accept?token={raw_token}"
+        invite_url = (
+            f"{settings.public_frontend_url}/invitations/accept?token={raw_token}"
+        )
         await self.email.send_organization_invitation(
             to=email,
             invite_url=invite_url,
@@ -159,7 +161,9 @@ class InvitationService:
             expires_at=datetime.now(UTC)
             + timedelta(hours=settings.invitation_expire_hours),
         )
-        invite_url = f"{settings.frontend_base_url.rstrip('/')}/invitations/accept?token={raw_token}"
+        invite_url = (
+            f"{settings.public_frontend_url}/invitations/accept?token={raw_token}"
+        )
         await self.email.send_organization_invitation(
             to=updated.email,
             invite_url=invite_url,

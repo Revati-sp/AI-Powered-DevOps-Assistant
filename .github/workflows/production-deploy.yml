@@ -1,0 +1,185 @@
+name: Production Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Commit SHA already deployed and verified on staging
+        required: true
+        type: string
+      backend_digest:
+        description: Backend image digest (sha256:...)
+        required: true
+        type: string
+      frontend_digest:
+        description: Frontend image digest (sha256:...)
+        required: true
+        type: string
+      staging_run_url:
+        description: URL of successful staging deploy workflow run
+        required: true
+        type: string
+      backup_confirmed:
+        description: Confirm Postgres backup / PITR status checked (yes)
+        required: true
+        type: choice
+        options: [no, yes]
+      migration_reviewed:
+        description: Confirm Alembic migration reviewed on staging (yes)
+        required: true
+        type: choice
+        options: [no, yes]
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/ai-devops-backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/ai-devops-frontend
+
+jobs:
+  guardrails:
+    name: Production guardrails
+    runs-on: ubuntu-latest
+    outputs:
+      commit_sha: ${{ steps.resolve.outputs.commit_sha }}
+      backend_digest: ${{ steps.resolve.outputs.backend_digest }}
+      frontend_digest: ${{ steps.resolve.outputs.frontend_digest }}
+    steps:
+      - name: Resolve inputs
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "commit_sha=${{ inputs.commit_sha }}" >> "$GITHUB_OUTPUT"
+            echo "backend_digest=${{ inputs.backend_digest }}" >> "$GITHUB_OUTPUT"
+            echo "frontend_digest=${{ inputs.frontend_digest }}" >> "$GITHUB_OUTPUT"
+            if [ "${{ inputs.backup_confirmed }}" != "yes" ]; then
+              echo "Backup confirmation required" >&2
+              exit 1
+            fi
+            if [ "${{ inputs.migration_reviewed }}" != "yes" ]; then
+              echo "Migration review confirmation required" >&2
+              exit 1
+            fi
+            echo "Staging evidence: ${{ inputs.staging_run_url }}"
+          else
+            echo "commit_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+            echo "backend_digest=" >> "$GITHUB_OUTPUT"
+            echo "frontend_digest=" >> "$GITHUB_OUTPUT"
+            echo "Tag deploys still require manual digest confirmation via workflow_dispatch for image pins." >&2
+            exit 1
+          fi
+
+  backend-ci:
+    name: Backend CI
+    needs: [guardrails]
+    uses: ./.github/workflows/backend-ci.yml
+
+  frontend-ci:
+    name: Frontend CI
+    needs: [guardrails]
+    uses: ./.github/workflows/frontend-ci.yml
+
+  validate-blueprints:
+    name: Validate Render blueprints
+    needs: [guardrails]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guardrails.outputs.commit_sha }}
+      - run: ./deploy/render/scripts/validate_blueprint.sh
+
+  deploy-production:
+    name: Deploy production
+    needs: [guardrails, backend-ci, frontend-ci, validate-blueprints]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guardrails.outputs.commit_sha }}
+
+      - name: Record release identity
+        run: |
+          {
+            echo "commit_sha=${{ needs.guardrails.outputs.commit_sha }}"
+            echo "backend_image=${{ env.BACKEND_IMAGE }}@${{ needs.guardrails.outputs.backend_digest }}"
+            echo "frontend_image=${{ env.FRONTEND_IMAGE }}@${{ needs.guardrails.outputs.frontend_digest }}"
+            echo "staging_run_url=${{ inputs.staging_run_url }}"
+          } | tee production-release.env
+
+      - name: Deploy API (preDeploy runs migrations)
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_API_SERVICE_ID }}
+          COMMIT_ID: ${{ needs.guardrails.outputs.commit_sha }}
+          BACKEND_DIGEST: ${{ needs.guardrails.outputs.backend_digest }}
+          USE_IMAGE: ${{ vars.RENDER_USE_IMAGE_DEPLOYS }}
+        run: |
+          if [ "$USE_IMAGE" = "true" ]; then
+            export IMAGE_URL="${BACKEND_IMAGE}@${BACKEND_DIGEST}"
+          fi
+          ./deploy/render/scripts/deploy_render.sh
+
+      - name: Deploy worker
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_WORKER_SERVICE_ID }}
+          COMMIT_ID: ${{ needs.guardrails.outputs.commit_sha }}
+          BACKEND_DIGEST: ${{ needs.guardrails.outputs.backend_digest }}
+          USE_IMAGE: ${{ vars.RENDER_USE_IMAGE_DEPLOYS }}
+        run: |
+          if [ "$USE_IMAGE" = "true" ]; then
+            export IMAGE_URL="${BACKEND_IMAGE}@${BACKEND_DIGEST}"
+          fi
+          ./deploy/render/scripts/deploy_render.sh
+
+      - name: Deploy frontend
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_FRONTEND_SERVICE_ID }}
+          COMMIT_ID: ${{ needs.guardrails.outputs.commit_sha }}
+          FRONTEND_DIGEST: ${{ needs.guardrails.outputs.frontend_digest }}
+          USE_IMAGE: ${{ vars.RENDER_USE_IMAGE_DEPLOYS }}
+        run: |
+          if [ "$USE_IMAGE" = "true" ]; then
+            export IMAGE_URL="${FRONTEND_IMAGE}@${FRONTEND_DIGEST}"
+          fi
+          ./deploy/render/scripts/deploy_render.sh
+
+      - name: Wait for deploy settle
+        run: sleep 60
+
+      - name: Smoke tests
+        env:
+          FRONTEND_URL: ${{ vars.PRODUCTION_FRONTEND_URL }}
+          API_URL: ${{ vars.PRODUCTION_API_URL }}
+        run: ./deploy/render/scripts/smoke_test.sh
+
+      - name: Upload release record
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-release-${{ needs.guardrails.outputs.commit_sha }}
+          path: production-release.env
+
+      - name: Rollback instructions
+        if: always()
+        run: |
+          cat <<'EOF'
+          Rollback (application only; does not downgrade the database):
+          1. Redeploy previous commit/digest via Render dashboard Rollback, or
+          2. RENDER_SERVICE_ID=... COMMIT_ID=<previous> ./deploy/render/scripts/deploy_render.sh
+          3. Keep API and worker on the same version
+          4. See docs/rollback.md
+          EOF

@@ -68,8 +68,12 @@ GitHub Actions (`.github/workflows/backend-ci.yml`) runs lint, type-check, tests
 
 ## Production checklist
 
-- Set `APP_ENV=production`, strong `SECRET_KEY` and `REFRESH_TOKEN_PEPPER` (≥32 chars).
+Full platform guide: [deployment.md](./deployment.md).
+
+- Set `APP_ENV=production` (or `staging`), strong `SECRET_KEY` and `REFRESH_TOKEN_PEPPER` (≥32 chars).
 - Configure `ALLOWED_ORIGINS` explicitly (no wildcard).
 - Keep `ALLOW_INSECURE_LLM_HTTP=false`.
-- Enable HSTS via production defaults.
+- Enable HSTS via production defaults; set `TRUSTED_PROXY_COUNT` behind Render.
 - Restrict metrics endpoint (`METRICS_REQUIRE_AUTH` / `METRICS_ALLOWED_IPS`) if exposed.
+- Disable docs/OpenAPI; use Postmark SMTP (`EMAIL_PROVIDER=smtp`); never `console` email in staging/prod.
+- Run migrations only via API `preDeployCommand` (see [deploy/render](../deploy/render/)).

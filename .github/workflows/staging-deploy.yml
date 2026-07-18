@@ -1,0 +1,180 @@
+name: Staging Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "deploy/render/**"
+      - ".github/workflows/staging-deploy.yml"
+      - ".github/workflows/backend-ci.yml"
+      - ".github/workflows/frontend-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/ai-devops-backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository_owner }}/ai-devops-frontend
+
+jobs:
+  backend-ci:
+    name: Backend CI
+    uses: ./.github/workflows/backend-ci.yml
+
+  frontend-ci:
+    name: Frontend CI
+    uses: ./.github/workflows/frontend-ci.yml
+
+  validate-blueprints:
+    name: Validate Render blueprints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Structural validation
+        run: ./deploy/render/scripts/validate_blueprint.sh
+
+  build-and-scan:
+    name: Build, scan, push images
+    needs: [backend-ci, frontend-ci, validate-blueprints]
+    runs-on: ubuntu-latest
+    outputs:
+      backend_digest: ${{ steps.backend_meta.outputs.digest }}
+      frontend_digest: ${{ steps.frontend_meta.outputs.digest }}
+      image_tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image tag
+        id: meta
+        run: echo "version=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push backend
+        id: backend_meta
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:${{ steps.meta.outputs.version }}
+            ${{ env.BACKEND_IMAGE }}:staging
+          provenance: false
+
+      - name: Build and push frontend
+        id: frontend_meta
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:${{ steps.meta.outputs.version }}
+            ${{ env.FRONTEND_IMAGE }}:staging
+          provenance: false
+
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.BACKEND_IMAGE }}:${{ steps.meta.outputs.version }}
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE }}:${{ steps.meta.outputs.version }}
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+
+  deploy-staging:
+    name: Deploy staging (migrate → worker → API → frontend)
+    needs: [build-and-scan]
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record release identity
+        run: |
+          {
+            echo "commit_sha=${GITHUB_SHA}"
+            echo "backend_image=${{ env.BACKEND_IMAGE }}@${{ needs.build-and-scan.outputs.backend_digest }}"
+            echo "frontend_image=${{ env.FRONTEND_IMAGE }}@${{ needs.build-and-scan.outputs.frontend_digest }}"
+            echo "image_tag=${{ needs.build-and-scan.outputs.image_tag }}"
+          } | tee staging-release.env
+
+      - name: Deploy API (preDeploy runs migrations)
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_API_SERVICE_ID }}
+          COMMIT_ID: ${{ github.sha }}
+          BACKEND_DIGEST: ${{ needs.build-and-scan.outputs.backend_digest }}
+          USE_IMAGE: ${{ vars.RENDER_USE_IMAGE_DEPLOYS }}
+        run: |
+          if [ "$USE_IMAGE" = "true" ]; then
+            export IMAGE_URL="${BACKEND_IMAGE}@${BACKEND_DIGEST}"
+          fi
+          ./deploy/render/scripts/deploy_render.sh
+
+      - name: Deploy worker
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_WORKER_SERVICE_ID }}
+          COMMIT_ID: ${{ github.sha }}
+          BACKEND_DIGEST: ${{ needs.build-and-scan.outputs.backend_digest }}
+          USE_IMAGE: ${{ vars.RENDER_USE_IMAGE_DEPLOYS }}
+        run: |
+          if [ "$USE_IMAGE" = "true" ]; then
+            export IMAGE_URL="${BACKEND_IMAGE}@${BACKEND_DIGEST}"
+          fi
+          ./deploy/render/scripts/deploy_render.sh
+
+      - name: Deploy frontend
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_FRONTEND_SERVICE_ID }}
+          COMMIT_ID: ${{ github.sha }}
+          FRONTEND_DIGEST: ${{ needs.build-and-scan.outputs.frontend_digest }}
+          USE_IMAGE: ${{ vars.RENDER_USE_IMAGE_DEPLOYS }}
+        run: |
+          if [ "$USE_IMAGE" = "true" ]; then
+            export IMAGE_URL="${FRONTEND_IMAGE}@${FRONTEND_DIGEST}"
+          fi
+          ./deploy/render/scripts/deploy_render.sh
+
+      - name: Wait for deploy settle
+        run: sleep 45
+
+      - name: Smoke tests
+        env:
+          FRONTEND_URL: ${{ vars.STAGING_FRONTEND_URL }}
+          API_URL: ${{ vars.STAGING_API_URL }}
+        run: ./deploy/render/scripts/smoke_test.sh
+
+      - name: Upload release record
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-release-${{ github.sha }}
+          path: staging-release.env

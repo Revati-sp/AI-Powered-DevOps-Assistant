@@ -45,7 +45,12 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    setup_logging(settings.debug)
+    setup_logging(
+        settings.debug,
+        log_format=settings.log_format,
+        service=settings.log_service_name,
+        environment=settings.app_env,
+    )
     settings.validate_production_secrets()
     init_observability(settings, app=app)
     logger.info("Starting %s (%s)", settings.app_name, settings.app_env)
@@ -121,6 +126,20 @@ async def request_context_middleware(request: Request, call_next: Any) -> Any:
             route=route,
             status_code=response.status_code,
             duration_seconds=duration,
+        )
+        logger.info(
+            "%s %s -> %s",
+            request.method,
+            route,
+            response.status_code,
+            extra={
+                "request_id": request_id,
+                "route": route,
+                "status": response.status_code,
+                "duration": round(duration, 4),
+                "service": settings.log_service_name,
+                "environment": settings.app_env,
+            },
         )
     return response
 

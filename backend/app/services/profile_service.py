@@ -124,17 +124,11 @@ class ProfileService:
                 or (audit_context.ip_address if audit_context else None),
             )
             confirmation_url = (
-                f"{settings.frontend_base_url.rstrip('/')}"
-                f"/confirm-email-change?token={raw_token}"
+                f"{settings.public_frontend_url}/confirm-email-change?token={raw_token}"
             )
-            await self.email.send(
+            await self.email.send_email_change_confirmation(
                 to=normalized_email,
-                subject="Confirm your new email address",
-                body_text=(
-                    "Confirm your new email address using this link:\n\n"
-                    f"{confirmation_url}\n\n"
-                    "If you did not request this change, you can ignore this email."
-                ),
+                confirm_url=confirmation_url,
             )
             await self.audit.record_event(
                 action="user.email_change.requested",
