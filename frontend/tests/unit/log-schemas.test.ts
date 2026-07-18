@@ -13,6 +13,7 @@ describe("logAnalyzePasteSchema", () => {
       content: "ERROR something failed",
       provider: "gemini",
       async_mode: false,
+      workspace: "personal",
     });
     expect(result.success).toBe(true);
   });
@@ -23,6 +24,7 @@ describe("logAnalyzePasteSchema", () => {
         content: "",
         provider: "gemini",
         async_mode: false,
+        workspace: "personal",
       }).success,
     ).toBe(false);
 
@@ -31,6 +33,7 @@ describe("logAnalyzePasteSchema", () => {
         content: "x".repeat(LOG_CONTENT_MAX + 1),
         provider: "gemini",
         async_mode: true,
+        workspace: "personal",
       }).success,
     ).toBe(false);
   });

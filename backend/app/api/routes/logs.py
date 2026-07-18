@@ -19,7 +19,10 @@ async def analyze_logs(
     _rl: UploadRateLimit,
 ) -> APIResponse[LogAnalyzeResult]:
     result = await LogAnalyzerService(db).analyze(
-        current_user, payload.content, provider_name=payload.provider
+        current_user,
+        payload.content,
+        provider_name=payload.provider,
+        organization_id=payload.organization_id,
     )
     return APIResponse(success=True, data=result)
 
@@ -52,6 +55,7 @@ async def analyze_logs_async(
         current_user,
         payload.content,
         provider_name=payload.provider,
+        organization_id=payload.organization_id,
         idempotency_key=idempotency_key,
         audit_context=build_audit_context(request),
     )

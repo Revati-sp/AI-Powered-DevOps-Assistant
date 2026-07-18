@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   analyzeLogs,
@@ -32,12 +32,22 @@ export function useAnalyzeLogsAsyncMutation() {
     mutationFn: ({
       content,
       provider,
+      organizationId,
       idempotencyKey,
     }: {
       content: string;
       provider: string;
+      organizationId?: string | null;
       idempotencyKey?: string;
-    }) => analyzeLogsAsync({ content, provider }, { idempotencyKey }),
+    }) =>
+      analyzeLogsAsync(
+        {
+          content,
+          provider,
+          organization_id: organizationId ?? null,
+        },
+        { idempotencyKey },
+      ),
   });
 }
 
@@ -48,4 +58,13 @@ export function useLogAnalysisTask(taskId: string | null) {
     enabled: Boolean(taskId),
     refetchInterval: (query) => taskPollInterval(query.state.data?.status),
   });
+}
+
+/** Drop in-flight async log task caches when switching workspace organization. */
+export function useClearLogTaskCacheOnOrgChange(organizationId: string | null) {
+  const queryClient = useQueryClient();
+  return () => {
+    void queryClient.removeQueries({ queryKey: queryKeys.tasks.all() });
+    void organizationId;
+  };
 }

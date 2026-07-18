@@ -70,9 +70,20 @@ async def _analyze_logs_async(
             return {"error": "Analysis not found"}
 
         background_task = await task_repo.get_by_id(task_uuid)
-        organization_id = (
-            background_task.organization_id if background_task is not None else None
-        )
+        if background_task is None:
+            await task_service.mark_failed(
+                task_uuid,
+                error_code="NOT_FOUND",
+                error_message="Background task not found",
+            )
+            await session.commit()
+            record_background_task("log_analysis", "failed")
+            return {"error": "Background task not found"}
+
+        # Derive organization scope only from the persisted task record.
+        organization_id = background_task.organization_id
+        if analysis.organization_id != organization_id:
+            analysis.organization_id = organization_id
 
         await task_service.mark_running(task_uuid, progress=10)
         await repo.update_analysis(analysis, status=AnalysisStatus.RUNNING)
@@ -108,6 +119,7 @@ async def _analyze_logs_async(
                         provider_name=provider_name,
                         session=session,
                         user_id=user_uuid,
+                        organization_id=organization_id,
                     )
             else:
                 result = await analyze_log_content(
@@ -115,6 +127,7 @@ async def _analyze_logs_async(
                     provider_name=provider_name,
                     session=session,
                     user_id=user_uuid,
+                    organization_id=organization_id,
                 )
 
             payload = result.model_dump()

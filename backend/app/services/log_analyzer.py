@@ -9,14 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.models.analysis import AnalysisStatus, AnalysisType
+from app.models.background_task import BackgroundTask
 from app.models.provider_config import LLMOperation
 from app.models.user import User
 from app.repositories.artifact_repository import ArtifactRepository
 from app.schemas.logs import AsyncTaskResponse, LogAnalyzeResult
-from app.services.audit_service import AuditRequestContext
+from app.services.audit_service import AuditRequestContext, AuditService
 from app.services.llm.factory import get_llm_provider
 from app.services.llm.gateway import LLMGateway
 from app.services.llm.prompts import LOG_ANALYSIS_SYSTEM_PROMPT
+from app.services.rbac import OrganizationAuthService, Permission
 from app.services.task_service import TASK_TYPE_LOG_ANALYSIS, TaskService
 from app.services.usage_quota_service import UsageQuotaService
 from app.utils.sanitization import preview_text, sanitize_text
@@ -114,6 +116,7 @@ async def analyze_log_content(
     provider_name: str = "gemini",
     session: AsyncSession | None = None,
     user_id: UUID | None = None,
+    organization_id: UUID | None = None,
 ) -> LogAnalyzeResult:
     """Analyze logs with static signals + LLM enrichment.
 
@@ -137,7 +140,7 @@ async def analyze_log_content(
         if session is not None and user_id is not None:
             await UsageQuotaService(session).record_llm_usage(
                 user_id=user_id,
-                organization_id=None,
+                organization_id=organization_id,
                 operation=LLMOperation.LOG_ANALYSIS.value,
                 provider=provider.name,
                 model=None,
@@ -155,6 +158,19 @@ class LogAnalyzerService:
         self.session = session
         self.artifacts = ArtifactRepository(session)
         self.tasks = TaskService(session)
+        self.audit = AuditService(session)
+        self.org_auth = OrganizationAuthService(session)
+
+    def _async_response(
+        self, background_task: BackgroundTask, *, analysis_id: UUID | None
+    ) -> AsyncTaskResponse:
+        return AsyncTaskResponse(
+            task_id=str(background_task.id),
+            status=background_task.status.value,
+            analysis_id=analysis_id,
+            celery_task_id=background_task.celery_task_id,
+            organization_id=background_task.organization_id,
+        )
 
     async def analyze(
         self,
@@ -165,6 +181,10 @@ class LogAnalyzerService:
         persist: bool = True,
         organization_id: UUID | None = None,
     ) -> LogAnalyzeResult:
+        if organization_id is not None:
+            await self.org_auth.require_permission(
+                organization_id, user.id, Permission.RESOURCE_CREATE
+            )
         cleaned = sanitize_text(content, max_length=500_000)
         signals = _static_log_signals(cleaned)
         fallback = _fallback_result(signals)
@@ -191,6 +211,7 @@ class LogAnalyzerService:
         if persist:
             await self.artifacts.create_analysis(
                 user_id=user.id,
+                organization_id=organization_id,
                 analysis_type=AnalysisType.LOG,
                 input_preview=preview_text(cleaned),
                 status=AnalysisStatus.COMPLETED,
@@ -211,6 +232,9 @@ class LogAnalyzerService:
         from app.workers.tasks import analyze_logs_task
 
         cleaned = sanitize_text(content, max_length=500_000)
+        log_bytes = len(cleaned.encode("utf-8"))
+        # Authorization for organization_id is enforced in TaskService.create_task
+        # via Permission.RESOURCE_CREATE (non-members get NOT_FOUND).
         background_task = await self.tasks.create_task(
             user,
             task_type=TASK_TYPE_LOG_ANALYSIS,
@@ -218,20 +242,19 @@ class LogAnalyzerService:
             idempotency_key=idempotency_key,
             audit_context=audit_context,
         )
+        scoped_organization_id = background_task.organization_id
 
         existing_analysis = await self.artifacts.get_analysis_by_task_id(
             str(background_task.id)
         )
         if existing_analysis is not None:
-            return AsyncTaskResponse(
-                task_id=str(background_task.id),
-                status=background_task.status.value,
-                analysis_id=existing_analysis.id,
-                celery_task_id=background_task.celery_task_id,
+            return self._async_response(
+                background_task, analysis_id=existing_analysis.id
             )
 
         analysis = await self.artifacts.create_analysis(
             user_id=user.id,
+            organization_id=scoped_organization_id,
             analysis_type=AnalysisType.LOG,
             input_preview=preview_text(cleaned),
             status=AnalysisStatus.PENDING,
@@ -239,6 +262,23 @@ class LogAnalyzerService:
         )
         await self.session.flush()
 
+        await self.audit.record_event(
+            action="log_analysis.async.created",
+            actor_user_id=user.id,
+            organization_id=scoped_organization_id,
+            resource_type="background_task",
+            resource_id=background_task.id,
+            request_context=audit_context,
+            metadata={
+                "task_type": TASK_TYPE_LOG_ANALYSIS,
+                "log_bytes": log_bytes,
+                "organization_scoped": scoped_organization_id is not None,
+                "analysis_id": str(analysis.id),
+            },
+        )
+
+        # Celery receives only the persisted task/analysis IDs + sanitized content.
+        # Organization scope is reloaded from BackgroundTask in the worker.
         async_result = analyze_logs_task.delay(
             str(background_task.id),
             str(analysis.id),
@@ -254,9 +294,4 @@ class LogAnalyzerService:
         )
         await self.session.commit()
 
-        return AsyncTaskResponse(
-            task_id=str(background_task.id),
-            status=background_task.status.value,
-            analysis_id=analysis.id,
-            celery_task_id=async_result.id,
-        )
+        return self._async_response(background_task, analysis_id=analysis.id)

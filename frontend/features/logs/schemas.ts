@@ -9,6 +9,8 @@ export const LOG_ASYNC_THRESHOLD = 80_000;
 
 export const providerSchema = z.enum(LLM_PROVIDERS);
 
+export const logWorkspaceSchema = z.enum(["personal", "organization"]);
+
 export const logAnalyzePasteSchema = z.object({
   content: z
     .string()
@@ -16,6 +18,7 @@ export const logAnalyzePasteSchema = z.object({
     .max(LOG_CONTENT_MAX, `Log content must be at most ${LOG_CONTENT_MAX} characters`),
   provider: providerSchema,
   async_mode: z.boolean(),
+  workspace: logWorkspaceSchema,
 });
 
 export type LogAnalyzePasteValues = z.infer<typeof logAnalyzePasteSchema>;

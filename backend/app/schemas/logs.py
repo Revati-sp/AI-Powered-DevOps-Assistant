@@ -8,6 +8,7 @@ class LogAnalyzeRequest(BaseModel):
     content: str = Field(min_length=1, max_length=500_000)
     provider: str = "gemini"
     async_mode: bool = False
+    organization_id: UUID | None = None
 
 
 class LogAnalyzeResult(BaseModel):
@@ -29,6 +30,7 @@ class AsyncTaskResponse(BaseModel):
     status: str
     analysis_id: UUID | None = None
     celery_task_id: str | None = None
+    organization_id: UUID | None = None
 
 
 class TaskStatusResponse(BaseModel):

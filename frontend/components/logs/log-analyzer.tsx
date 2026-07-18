@@ -5,6 +5,7 @@ import * as React from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
+import { useOrgRole } from "@/components/app-shell/use-org-role";
 import { CodeEditor } from "@/components/editors/code-editor";
 import { PageHeader } from "@/components/data-display/page-header";
 import { SeverityBadge } from "@/components/data-display/severity-badge";
@@ -50,9 +51,12 @@ import {
   type LogAnalyzePasteValues,
 } from "@/features/logs/schemas";
 import type { LogAnalyzeResult } from "@/features/logs/types";
+import { useOrganizations } from "@/features/organizations/hooks";
 import { isApiClientError } from "@/lib/api/errors";
 import { LLM_PROVIDERS } from "@/lib/constants/app";
+import { can } from "@/lib/permissions/rbac";
 import { StatusBadge } from "@/components/data-display/status-badge";
+import { useWorkspaceStore } from "@/store/workspace-store";
 
 function ResultsPanel({ result }: { result: LogAnalyzeResult }) {
   return (
@@ -117,10 +121,18 @@ export function LogAnalyzer() {
   const [tab, setTab] = React.useState<"paste" | "upload">("paste");
   const [result, setResult] = React.useState<LogAnalyzeResult | null>(null);
   const [taskId, setTaskId] = React.useState<string | null>(null);
+  const [queuedOrganizationId, setQueuedOrganizationId] = React.useState<string | null>(null);
   const [uploadProvider, setUploadProvider] =
     React.useState<(typeof LLM_PROVIDERS)[number]>("gemini");
   const [uploadError, setUploadError] = React.useState<string | null>(null);
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
+
+  const organizationId = useWorkspaceStore((state) => state.currentOrganizationId);
+  const orgRole = useOrgRole();
+  const canCreateOrgAnalysis = Boolean(orgRole && can(orgRole, "resource.create"));
+  const orgsQuery = useOrganizations({ limit: 50, offset: 0 });
+  const currentOrgName =
+    orgsQuery.data?.items.find((org) => org.id === organizationId)?.name ?? "Current organization";
 
   const syncMutation = useAnalyzeLogsMutation();
   const asyncMutation = useAnalyzeLogsAsyncMutation();
@@ -133,6 +145,7 @@ export function LogAnalyzer() {
       content: "",
       provider: "gemini",
       async_mode: false,
+      workspace: "personal",
     },
   });
 
@@ -144,6 +157,16 @@ export function LogAnalyzer() {
       form.setValue("async_mode", true);
     }
   }, [suggestAsync, form]);
+
+  React.useEffect(() => {
+    // Clear in-flight async UI when the selected organization changes.
+    setTaskId(null);
+    setQueuedOrganizationId(null);
+    setResult(null);
+    if (!canCreateOrgAnalysis && form.getValues("workspace") === "organization") {
+      form.setValue("workspace", "personal");
+    }
+  }, [organizationId, canCreateOrgAnalysis, form]);
 
   React.useEffect(() => {
     const task = taskQuery.data;
@@ -158,15 +181,30 @@ export function LogAnalyzer() {
         toast.error("Task finished but result could not be parsed");
       }
       setTaskId(null);
+      setQueuedOrganizationId(null);
     } else if (task.status === "failed" || task.status === "cancelled") {
       toast.error(task.error_message ?? `Analysis ${task.status}`);
       setTaskId(null);
+      setQueuedOrganizationId(null);
     }
   }, [taskQuery.data]);
 
   const onPasteSubmit = form.handleSubmit(async (values) => {
     setResult(null);
     setTaskId(null);
+    setQueuedOrganizationId(null);
+    const selectedOrganizationId =
+      values.workspace === "organization" && canCreateOrgAnalysis ? organizationId : null;
+
+    if (values.workspace === "organization" && !canCreateOrgAnalysis) {
+      toast.error("Your role cannot create organization log analyses.");
+      return;
+    }
+    if (values.workspace === "organization" && !organizationId) {
+      toast.error("Select an organization in the workspace switcher first.");
+      return;
+    }
+
     try {
       if (values.async_mode) {
         const idempotencyKey =
@@ -176,9 +214,11 @@ export function LogAnalyzer() {
         const asyncResult = await asyncMutation.mutateAsync({
           content: values.content,
           provider: values.provider,
+          organizationId: selectedOrganizationId,
           idempotencyKey,
         });
         setTaskId(asyncResult.task_id);
+        setQueuedOrganizationId(asyncResult.organization_id ?? selectedOrganizationId);
         toast.message("Analysis queued", {
           description: `Task ${asyncResult.task_id}`,
         });
@@ -189,11 +229,26 @@ export function LogAnalyzer() {
         content: values.content,
         provider: values.provider,
         async_mode: false,
+        organization_id: selectedOrganizationId,
       });
       setResult(syncResult);
       toast.success("Log analysis complete");
     } catch (error) {
-      toast.error(isApiClientError(error) ? error.message : "Failed to analyze logs");
+      if (isApiClientError(error)) {
+        if (error.status === 429) {
+          toast.error(
+            error.retryAfterSeconds !== undefined
+              ? `${error.message} Try again in ${error.retryAfterSeconds}s.`
+              : error.message,
+          );
+        } else if (error.code === "QUOTA_EXCEEDED" || error.status === 403 || error.status === 404) {
+          toast.error(error.message);
+        } else {
+          toast.error(error.message);
+        }
+        return;
+      }
+      toast.error("Failed to analyze logs");
     }
   });
 
@@ -308,6 +363,41 @@ export function LogAnalyzer() {
                   />
                   <FormField
                     control={form.control}
+                    name="workspace"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Workspace</FormLabel>
+                        <Select
+                          value={field.value}
+                          onValueChange={field.onChange}
+                          disabled={Boolean(taskId)}
+                        >
+                          <FormControl>
+                            <SelectTrigger aria-label="Analysis workspace">
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="personal">Personal workspace</SelectItem>
+                            <SelectItem value="organization" disabled={!canCreateOrgAnalysis || !organizationId}>
+                              {organizationId
+                                ? canCreateOrgAnalysis
+                                  ? currentOrgName
+                                  : `${currentOrgName} (viewers cannot create)`
+                                : "Select an organization first"}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormDescription>
+                          Organization analyses require the `resource.create` permission and use the
+                          organization selected in the header switcher.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
                     name="async_mode"
                     render={({ field }) => (
                       <FormItem className="flex flex-row items-start gap-3 space-y-0">
@@ -386,6 +476,13 @@ export function LogAnalyzer() {
                 {taskQuery.data?.status ? <StatusBadge status={taskQuery.data.status} /> : null}
               </div>
               <Progress value={Math.min(100, Math.max(0, taskProgress))} />
+              <p className="text-muted-foreground text-xs">
+                Workspace:{" "}
+                {queuedOrganizationId
+                  ? orgsQuery.data?.items.find((org) => org.id === queuedOrganizationId)?.name ??
+                    "Organization"
+                  : "Personal"}
+              </p>
               <p className="text-muted-foreground text-xs">
                 Task ID: <span className="font-mono">{taskId}</span>
               </p>

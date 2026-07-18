@@ -33,7 +33,9 @@ Permissions are defined in `app/services/rbac.py` as the `Permission` enum.
 
 ## API usage
 
-Organization routes under `/api/v1/organizations` and nested member routes check permissions before mutating state. Artifact, policy, audit, task, and org-scoped chat flows call `require_permission` with the relevant enum value.
+Organization routes under `/api/v1/organizations` and nested member routes check permissions before mutating state. Artifact, policy, audit, task, org-scoped chat, and organization-scoped log analysis flows call `require_permission` with the relevant enum value.
+
+Async log analysis (`POST /api/v1/logs/analyze/async`) accepts optional `organization_id`. When set, the caller must have `resource.create`. Usage and audit attribution follow the organization when scoped; personal analyses keep `organization_id = null`.
 
 Failed permission checks return HTTP `403` with code `FORBIDDEN`. Unknown or non-member organization access returns HTTP `404` with code `NOT_FOUND`.
 

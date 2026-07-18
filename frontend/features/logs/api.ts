@@ -15,6 +15,7 @@ export function analyzeLogs(body: LogAnalyzeRequest) {
       content: body.content,
       provider: body.provider,
       async_mode: false,
+      organization_id: body.organization_id ?? null,
     },
     timeoutMs: 120_000,
   });
@@ -32,7 +33,7 @@ export function analyzeLogsUpload(file: File, provider: string) {
 }
 
 export function analyzeLogsAsync(
-  body: Pick<LogAnalyzeRequest, "content" | "provider">,
+  body: Pick<LogAnalyzeRequest, "content" | "provider" | "organization_id">,
   options?: { idempotencyKey?: string },
 ) {
   const headers: Record<string, string> = {};
@@ -45,6 +46,7 @@ export function analyzeLogsAsync(
       content: body.content,
       provider: body.provider,
       async_mode: true,
+      ...(body.organization_id ? { organization_id: body.organization_id } : {}),
     },
     headers,
     timeoutMs: 60_000,
